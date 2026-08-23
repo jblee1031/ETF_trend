@@ -27,7 +27,7 @@
   }
   header h1 { margin: 0 0 4px; font-size: 22px; }
   header p { margin: 0; color: var(--muted); font-size: 13px; }
-  main { padding: 20px; display: flex; flex-direction: column; gap: 28px; max-width: 1200px; margin: 0 auto; }
+  main { padding: 20px; max-width: 1200px; margin: 0 auto; }
   section.group {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -94,6 +94,20 @@
   .up { color: #ff5f5f; }
   .down { color: #4f8cff; }
   .loading, .error { padding: 40px; text-align: center; color: var(--muted); }
+  .tabs { display: flex; gap: 8px; padding: 0 20px; margin-top: 14px; }
+  .tabs button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+  }
+  .tabs button.active { background: var(--panel); color: var(--text); border-bottom-color: var(--panel); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: flex; flex-direction: column; gap: 28px; }
 </style>
 </head>
 <body>
@@ -101,7 +115,14 @@
   <h1>ETF Trend Dashboard</h1>
   <p id="updated-at">불러오는 중...</p>
 </header>
-<main id="app"><div class="loading">데이터를 불러오는 중입니다...</div></main>
+<nav class="tabs">
+  <button id="tab-btn-kr" class="active" data-tab="kr">국내 ETF</button>
+  <button id="tab-btn-us" data-tab="us">미국 주식/ETF</button>
+</nav>
+<main>
+  <div id="app-kr" class="tab-panel active"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-us" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+</main>
 
 <script>
 const PERIODS = [
@@ -124,10 +145,10 @@ function fmtNum(n) {
   return n.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
 }
 
-async function loadData() {
+async function loadData(groupsUrl, pricesUrl) {
   const [groups, prices] = await Promise.all([
-    fetch("data/groups.json", { cache: "no-store" }).then((r) => r.json()),
-    fetch("data/prices.json", { cache: "no-store" }).then((r) => r.json()),
+    fetch(groupsUrl, { cache: "no-store" }).then((r) => r.json()),
+    fetch(pricesUrl, { cache: "no-store" }).then((r) => r.json()),
   ]);
   return { groups, prices };
 }
@@ -146,7 +167,7 @@ function sliceDates(dates, days) {
   return dates.slice(Math.max(0, dates.length - days));
 }
 
-function renderGroup(group, prices) {
+function renderGroup(group, prices, currencySuffix) {
   const tickers = group.tickers;
   const allDates = buildUnionDates(tickers, prices);
 
@@ -176,7 +197,7 @@ function renderGroup(group, prices) {
   sep.style.width = "8px";
   controls.appendChild(sep);
 
-  [["pct", "변동률(%)"], ["price", "종가(원)"]].forEach(([key, label]) => {
+  [["pct", "변동률(%)"], ["price", `종가(${currencySuffix})`]].forEach(([key, label]) => {
     const b = document.createElement("button");
     b.textContent = label;
     b.dataset.metric = key;
@@ -250,7 +271,7 @@ function renderGroup(group, prices) {
             callbacks: {
               label: (ctx) => {
                 const v = ctx.parsed.y;
-                const suffix = state.metric === "pct" ? "" : "원";
+                const suffix = state.metric === "pct" ? "" : currencySuffix;
                 return `${ctx.dataset.label}: ${fmtNum(v)}${suffix}`;
               },
             },
@@ -303,19 +324,44 @@ function renderGroup(group, prices) {
   return section;
 }
 
-async function main() {
-  const app = document.getElementById("app");
+async function loadMarket(containerId, groupsUrl, pricesUrl, currencySuffix) {
+  const app = document.getElementById(containerId);
   try {
-    const { groups, prices } = await loadData();
-    document.getElementById("updated-at").textContent =
-      "마지막 업데이트: " + new Date(prices.generated_at).toLocaleString("ko-KR");
-
+    const { groups, prices } = await loadData(groupsUrl, pricesUrl);
     app.innerHTML = "";
-    groups.forEach((g) => app.appendChild(renderGroup(g, prices)));
+    groups.forEach((g) => app.appendChild(renderGroup(g, prices, currencySuffix)));
+    return prices.generated_at;
   } catch (err) {
     console.error(err);
     app.innerHTML = `<div class="error">데이터를 불러오지 못했습니다: ${err.message}</div>`;
+    return null;
   }
+}
+
+function setupTabs() {
+  const buttons = document.querySelectorAll(".tabs button");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      buttons.forEach((b) => b.classList.toggle("active", b === btn));
+      document.querySelectorAll(".tab-panel").forEach((p) => {
+        p.classList.toggle("active", p.id === `app-${btn.dataset.tab}`);
+      });
+    });
+  });
+}
+
+async function main() {
+  setupTabs();
+  const [krUpdatedAt, usUpdatedAt] = await Promise.all([
+    loadMarket("app-kr", "data/groups.json", "data/prices.json", "원"),
+    loadMarket("app-us", "data/us_groups.json", "data/us_prices.json", "$"),
+  ]);
+  const parts = [];
+  if (krUpdatedAt) parts.push("국내 " + new Date(krUpdatedAt).toLocaleString("ko-KR"));
+  if (usUpdatedAt) parts.push("미국 " + new Date(usUpdatedAt).toLocaleString("ko-KR"));
+  document.getElementById("updated-at").textContent = parts.length
+    ? "마지막 업데이트 — " + parts.join(" / ")
+    : "업데이트 시각을 불러오지 못했습니다.";
 }
 
 main();

@@ -1,0 +1,43 @@
+name: Update US Stock/ETF Prices
+
+on:
+  schedule:
+    # 06:30 KST on weekdays -> 21:30 UTC (Mon-Fri UTC captures Mon-Fri US
+    # close, whether that close was 16:00 EDT or 16:00 EST -- either way
+    # KST is far enough ahead that 21:30 UTC / 06:30 KST next day always
+    # lands after the close with margin, so one cron line covers both DST states).
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch latest US prices
+        run: python scripts/fetch_us_prices.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/us_prices.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update US prices ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
+          fi
