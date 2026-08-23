@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETF Trend Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e39;
+    --text: #e6e8ee;
+    --muted: #9aa1b1;
+    --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Malgun Gothic", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 24px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  main { padding: 20px; display: flex; flex-direction: column; gap: 28px; max-width: 1200px; margin: 0 auto; }
+  section.group {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px 20px;
+  }
+  .group-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .group-head h2 { margin: 0; font-size: 17px; }
+  .group-head .count { color: var(--muted); font-size: 12px; }
+  .controls { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .controls button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .controls button.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .chart-wrap { position: relative; height: 320px; margin-bottom: 14px; }
+  .table-wrap {
+    max-height: 320px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
+  thead th {
+    position: sticky; top: 0;
+    background: #1e222c;
+    color: var(--text);
+    text-align: right;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    z-index: 1;
+  }
+  thead th:first-child { text-align: left; position: sticky; left: 0; z-index: 2; }
+  tbody td {
+    padding: 5px 10px;
+    text-align: right;
+    border-bottom: 1px solid #1e222c;
+    color: var(--text);
+  }
+  tbody td:first-child {
+    text-align: left;
+    color: var(--muted);
+    position: sticky; left: 0;
+    background: var(--panel);
+  }
+  tbody tr:hover td { background: #1c2029; }
+  tbody tr:hover td:first-child { background: #1c2029; }
+  .up { color: #ff5f5f; }
+  .down { color: #4f8cff; }
+  .loading, .error { padding: 40px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ETF Trend Dashboard</h1>
+  <p id="updated-at">불러오는 중...</p>
+</header>
+<main id="app"><div class="loading">데이터를 불러오는 중입니다...</div></main>
+
+<script>
+const PERIODS = [
+  { key: "1m", label: "1개월", days: 22 },
+  { key: "3m", label: "3개월", days: 65 },
+  { key: "all", label: "전체", days: null },
+];
+
+const PALETTE = [
+  "#4f8cff", "#ff5f5f", "#39d98a", "#ffb03a", "#c07dff",
+  "#3adfe0", "#ff7dc0", "#a3d13a", "#ff9a4f", "#7d9bff",
+  "#e0c93a", "#5fd0ff", "#ff5fa3", "#8aff8a", "#d1a3ff",
+  "#ffd15f", "#5fffd1",
+];
+
+function colorFor(i) { return PALETTE[i % PALETTE.length]; }
+
+function fmtNum(n) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "";
+  return n.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+}
+
+async function loadData() {
+  const [groups, prices] = await Promise.all([
+    fetch("data/groups.json", { cache: "no-store" }).then((r) => r.json()),
+    fetch("data/prices.json", { cache: "no-store" }).then((r) => r.json()),
+  ]);
+  return { groups, prices };
+}
+
+function buildUnionDates(tickers, prices) {
+  const set = new Set();
+  tickers.forEach((t) => {
+    const hist = prices.tickers[t.code]?.history || [];
+    hist.forEach((p) => set.add(p.date));
+  });
+  return Array.from(set).sort();
+}
+
+function sliceDates(dates, days) {
+  if (!days) return dates;
+  return dates.slice(Math.max(0, dates.length - days));
+}
+
+function renderGroup(group, prices) {
+  const tickers = group.tickers;
+  const allDates = buildUnionDates(tickers, prices);
+
+  const section = document.createElement("section");
+  section.className = "group";
+
+  const head = document.createElement("div");
+  head.className = "group-head";
+  head.innerHTML = `<h2>${group.name}</h2><span class="count">${tickers.length}개 종목</span>`;
+  section.appendChild(head);
+
+  const controls = document.createElement("div");
+  controls.className = "controls";
+
+  const periodBtns = {};
+  const metricBtns = {};
+
+  PERIODS.forEach((p) => {
+    const b = document.createElement("button");
+    b.textContent = p.label;
+    b.dataset.period = p.key;
+    controls.appendChild(b);
+    periodBtns[p.key] = b;
+  });
+
+  const sep = document.createElement("span");
+  sep.style.width = "8px";
+  controls.appendChild(sep);
+
+  [["pct", "변동률(%)"], ["price", "종가(원)"]].forEach(([key, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.dataset.metric = key;
+    controls.appendChild(b);
+    metricBtns[key] = b;
+  });
+
+  section.appendChild(controls);
+
+  const chartWrap = document.createElement("div");
+  chartWrap.className = "chart-wrap";
+  const canvas = document.createElement("canvas");
+  chartWrap.appendChild(canvas);
+  section.appendChild(chartWrap);
+
+  const tableWrap = document.createElement("div");
+  tableWrap.className = "table-wrap";
+  section.appendChild(tableWrap);
+
+  const state = { period: "3m", metric: "pct" };
+
+  function computeDatasets(dates) {
+    return tickers.map((t, i) => {
+      const hist = prices.tickers[t.code]?.history || [];
+      const byDate = new Map(hist.map((p) => [p.date, p.close]));
+      let base = null;
+      const values = dates.map((d) => {
+        const v = byDate.has(d) ? byDate.get(d) : null;
+        if (v !== null && base === null) base = v;
+        if (state.metric === "pct") {
+          return v !== null && base ? (v / base) * 100 : null;
+        }
+        return v;
+      });
+      return {
+        label: t.name,
+        data: values,
+        borderColor: colorFor(i),
+        backgroundColor: colorFor(i),
+        borderWidth: 1.5,
+        pointRadius: 0,
+        spanGaps: true,
+        tension: 0.15,
+      };
+    });
+  }
+
+  let chart = null;
+  function drawChart() {
+    const periodDef = PERIODS.find((p) => p.key === state.period);
+    const dates = sliceDates(allDates, periodDef.days);
+    const datasets = computeDatasets(dates);
+
+    Object.values(periodBtns).forEach((b) => b.classList.toggle("active", b.dataset.period === state.period));
+    Object.values(metricBtns).forEach((b) => b.classList.toggle("active", b.dataset.metric === state.metric));
+
+    if (chart) chart.destroy();
+    chart = new Chart(canvas, {
+      type: "line",
+      data: { labels: dates, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: "#9aa1b1", boxWidth: 12, font: { size: 11 } },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const v = ctx.parsed.y;
+                const suffix = state.metric === "pct" ? "" : "원";
+                return `${ctx.dataset.label}: ${fmtNum(v)}${suffix}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: "#9aa1b1", maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { color: "#1e222c" } },
+          y: { ticks: { color: "#9aa1b1" }, grid: { color: "#1e222c" } },
+        },
+      },
+    });
+  }
+
+  function drawTable() {
+    const rows = [...allDates].reverse();
+    let html = "<table><thead><tr><th>날짜</th>";
+    tickers.forEach((t) => (html += `<th>${t.name}</th>`));
+    html += "</tr></thead><tbody>";
+
+    const histMaps = tickers.map((t) => new Map((prices.tickers[t.code]?.history || []).map((p) => [p.date, p.close])));
+
+    rows.forEach((d, rowIdx) => {
+      html += `<tr><td>${d}</td>`;
+      histMaps.forEach((m) => {
+        const v = m.has(d) ? m.get(d) : null;
+        html += `<td>${v === null ? "-" : fmtNum(v)}</td>`;
+      });
+      html += "</tr>";
+    });
+    html += "</tbody></table>";
+    tableWrap.innerHTML = html;
+  }
+
+  Object.entries(periodBtns).forEach(([key, btn]) => {
+    btn.addEventListener("click", () => {
+      state.period = key;
+      drawChart();
+    });
+  });
+  Object.entries(metricBtns).forEach(([key, btn]) => {
+    btn.addEventListener("click", () => {
+      state.metric = key;
+      drawChart();
+    });
+  });
+
+  drawChart();
+  drawTable();
+
+  return section;
+}
+
+async function main() {
+  const app = document.getElementById("app");
+  try {
+    const { groups, prices } = await loadData();
+    document.getElementById("updated-at").textContent =
+      "마지막 업데이트: " + new Date(prices.generated_at).toLocaleString("ko-KR");
+
+    app.innerHTML = "";
+    groups.forEach((g) => app.appendChild(renderGroup(g, prices)));
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = `<div class="error">데이터를 불러오지 못했습니다: ${err.message}</div>`;
+  }
+}
+
+main();
+</script>
+</body>
+</html>

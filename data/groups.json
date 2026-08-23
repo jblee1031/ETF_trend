@@ -1,0 +1,87 @@
+[
+  {
+    "id": "inverse-leverage",
+    "name": "인버스/레버리지",
+    "tickers": [
+      { "code": "252670", "name": "KODEX 200선물인버스2X" },
+      { "code": "122630", "name": "KODEX 레버리지" },
+      { "code": "251340", "name": "KODEX 코스닥150선물인버스" },
+      { "code": "233740", "name": "KODEX 코스닥150레버리지" }
+    ]
+  },
+  {
+    "id": "commodities",
+    "name": "원자재/귀금속선물",
+    "tickers": [
+      { "code": "0072R0", "name": "TIGER KRX금현물" },
+      { "code": "144600", "name": "KODEX 은선물(H)" },
+      { "code": "138910", "name": "KODEX 구리선물(H)" },
+      { "code": "261220", "name": "KODEX WTI원유선물(H)" },
+      { "code": "271060", "name": "KODEX 3대농산물선물(H)" }
+    ]
+  },
+  {
+    "id": "overseas-index",
+    "name": "해외지수(중국/인도/나스닥)",
+    "tickers": [
+      { "code": "192090", "name": "TIGER 차이나CSI300" },
+      { "code": "117690", "name": "TIGER 차이나항셍30" },
+      { "code": "371160", "name": "TIGER 차이나항셍테크" },
+      { "code": "236350", "name": "TIGER 인도니프티50레버리지(합성)" },
+      { "code": "133690", "name": "TIGER 미국나스닥100" }
+    ]
+  },
+  {
+    "id": "bonds-rates",
+    "name": "국채/금리선물",
+    "tickers": [
+      { "code": "308620", "name": "KODEX 미국10년국채선물" },
+      { "code": "304660", "name": "KODEX 미국30년국채울트라선물(H)" },
+      { "code": "292560", "name": "TIGER 일본엔선물" },
+      { "code": "152380", "name": "KODEX 국채선물10년" },
+      { "code": "481340", "name": "RISE 미국30년국채액티브" }
+    ]
+  },
+  {
+    "id": "domestic-sector",
+    "name": "국내 섹터테마",
+    "tickers": [
+      { "code": "091160", "name": "KODEX 반도체" },
+      { "code": "305540", "name": "TIGER 2차전지테마" },
+      { "code": "117700", "name": "KODEX 건설" },
+      { "code": "157500", "name": "TIGER 증권" },
+      { "code": "091170", "name": "KODEX 은행" },
+      { "code": "138540", "name": "TIGER 현대차그룹플러스" },
+      { "code": "228790", "name": "TIGER 화장품" },
+      { "code": "139250", "name": "TIGER 200 에너지화학" },
+      { "code": "139290", "name": "TIGER 200 경기소비재" },
+      { "code": "139240", "name": "TIGER 200 철강소재" },
+      { "code": "227540", "name": "TIGER 200 헬스케어" },
+      { "code": "364970", "name": "TIGER 바이오TOP10" },
+      { "code": "139280", "name": "TIGER 경기방어" }
+    ]
+  },
+  {
+    "id": "theme-global-mix",
+    "name": "테마/글로벌 혼합",
+    "tickers": [
+      { "code": "0148J0", "name": "TIGER 코리아휴머노이드로봇산업" },
+      { "code": "364990", "name": "TIGER 게임TOP10" },
+      { "code": "469170", "name": "ACE 포스코그룹포커스" },
+      { "code": "485540", "name": "KODEX 미국AI테크TOP10" },
+      { "code": "367770", "name": "RISE 수소경제테마" },
+      { "code": "441540", "name": "HANARO Fn조선해운" },
+      { "code": "434730", "name": "HANARO 원자력iSelect" },
+      { "code": "449450", "name": "PLUS K방산" },
+      { "code": "329650", "name": "KODEX TRF3070" },
+      { "code": "371460", "name": "TIGER 차이나전기차SOLACTIVE" },
+      { "code": "307510", "name": "TIGER 의료기기" },
+      { "code": "365000", "name": "TIGER 인터넷TOP10" },
+      { "code": "445290", "name": "KODEX 로봇액티브" },
+      { "code": "0038A0", "name": "KODEX 미국휴머노이드로봇" },
+      { "code": "307520", "name": "TIGER 지주회사" },
+      { "code": "379810", "name": "KODEX 미국나스닥100" },
+      { "code": "379800", "name": "KODEX 미국S&P500" }
+    ]
+  }
+]
