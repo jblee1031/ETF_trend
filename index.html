@@ -129,6 +129,18 @@
     font-size: 13px;
   }
   .toolbar .note { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .toolbar .sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+  .toolbar .controls { margin-bottom: 0; }
+  tbody tr.sector-row td {
+    background: #1a1e27;
+    color: var(--text);
+    font-weight: 600;
+    font-size: 11px;
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr.sector-row:hover td { background: #1a1e27; }
   .rule {
     font-size: 12px;
     font-weight: 400;
@@ -487,21 +499,63 @@ function stockCell(code, data, extra) {
   );
 }
 
-function signalTable(rows, data, withFullBadge) {
+const TABLE_COLS = 4 + MA_LABELS.length;
+
+function sortRows(rows, data, sort) {
+  const copy = [...rows];
+  if (sort === "cap") {
+    copy.sort((a, b) => (data.caps[b.c] || 0) - (data.caps[a.c] || 0));
+  } else {
+    copy.sort((a, b) => b.f - a.f || b.s - a.s || a.c.localeCompare(b.c));
+  }
+  return copy;
+}
+
+function bySector(rows, data, sort) {
+  const groups = new Map();
+  rows.forEach((r) => {
+    const sector = data.sectors[r.c] || "기타";
+    if (!groups.has(sector)) groups.set(sector, []);
+    groups.get(sector).push(r);
+  });
+  const capOf = (list) => list.reduce((sum, r) => sum + (data.caps[r.c] || 0), 0);
+  return [...groups.entries()]
+    .map(([sector, list]) => ({ sector, rows: sortRows(list, data, sort) }))
+    .sort((a, b) =>
+      sort === "cap"
+        ? capOf(b.rows) - capOf(a.rows)
+        : b.rows.length - a.rows.length || a.sector.localeCompare(b.sector)
+    );
+}
+
+function signalRow(r, data, withFullBadge) {
+  const badge = withFullBadge && r.f ? `<span class="badge">완전정배열</span>` : "";
+  const fresh = r.s === 1 ? `<span class="badge new">신규</span>` : "";
+  const chgCls = r.r > 0 ? "up" : r.r < 0 ? "down" : "";
+  let html = `<tr>${stockCell(r.c, data, badge + fresh)}`;
+  html += `<td>${fmtNum(r.p)}</td>`;
+  html += `<td class="${chgCls}">${r.r === null ? "-" : (r.r > 0 ? "+" : "") + r.r.toFixed(2) + "%"}</td>`;
+  r.m.forEach((v) => (html += `<td>${v === null ? "-" : fmtNum(v)}</td>`));
+  return html + `<td>${withFullBadge ? r.s : r.f}</td></tr>`;
+}
+
+function signalTable(rows, data, withFullBadge, opts) {
   if (!rows.length) return `<div class="empty">해당 조건을 만족하는 종목이 없습니다.</div>`;
+  const { sort = "streak", group = false } = opts || {};
+
   let html = "<table><thead><tr><th>종목</th><th>섹터</th><th>시가총액</th><th>종가</th><th>등락률</th>";
   MA_LABELS.forEach((m) => (html += `<th>${m}</th>`));
   html += "<th>연속일</th></tr></thead><tbody>";
-  rows.forEach((r) => {
-    const badge = withFullBadge && r.f ? `<span class="badge">완전정배열</span>` : "";
-    const fresh = r.s === 1 ? `<span class="badge new">신규</span>` : "";
-    const chgCls = r.r > 0 ? "up" : r.r < 0 ? "down" : "";
-    html += `<tr>${stockCell(r.c, data, badge + fresh)}`;
-    html += `<td>${fmtNum(r.p)}</td>`;
-    html += `<td class="${chgCls}">${r.r === null ? "-" : (r.r > 0 ? "+" : "") + r.r.toFixed(2) + "%"}</td>`;
-    r.m.forEach((v) => (html += `<td>${v === null ? "-" : fmtNum(v)}</td>`));
-    html += `<td>${withFullBadge ? r.s : r.f}</td></tr>`;
-  });
+
+  if (group) {
+    bySector(rows, data, sort).forEach((g) => {
+      const cap = g.rows.reduce((sum, r) => sum + (data.caps[r.c] || 0), 0);
+      html += `<tr class="sector-row"><td colspan="${TABLE_COLS}">${g.sector} · ${g.rows.length}종목 · ${fmtCap(cap)}</td></tr>`;
+      g.rows.forEach((r) => (html += signalRow(r, data, withFullBadge)));
+    });
+  } else {
+    sortRows(rows, data, sort).forEach((r) => (html += signalRow(r, data, withFullBadge)));
+  }
   return html + "</tbody></table>";
 }
 
@@ -705,6 +759,10 @@ function renderAlignment(app, data, label) {
     <div class="toolbar">
       <label>기준일</label>
       <select class="date-pick">${dates.map((d) => `<option value="${d}">${d}</option>`).join("")}</select>
+      <span class="sep"></span>
+      <label>정렬</label>
+      <span class="controls sort-controls"></span>
+      <span class="controls group-controls"></span>
       <span class="note">${label} 구성 ${data.universe_size}종목 · 종목명 클릭 시 FnGuide 기업정보</span>
     </div>
     <section class="group">
@@ -752,7 +810,15 @@ function renderAlignment(app, data, label) {
     </section>`;
 
   const q = (sel) => app.querySelector(sel);
-  const state = { date: dates[0], period: "3m", metric: "pct", paretoMode: "short", sector: null };
+  const state = {
+    date: dates[0],
+    period: "3m",
+    metric: "pct",
+    paretoMode: "short",
+    sector: null,
+    sort: "streak",
+    group: false,
+  };
 
   function makeButtons(container, items, onPick) {
     const btns = {};
@@ -778,6 +844,19 @@ function renderAlignment(app, data, label) {
     state.metric = k;
     drawTrend();
   });
+  const sortBtns = makeButtons(
+    q(".sort-controls"),
+    [["streak", "연속일순"], ["cap", "시가총액순"]],
+    (k) => {
+      state.sort = k;
+      drawTables();
+    }
+  );
+  const groupBtn = makeButtons(q(".group-controls"), [["group", "섹터별 묶기"]], () => {
+    state.group = !state.group;
+    drawTables();
+  }).group;
+
   const paretoBtns = makeButtons(
     q(".pareto-controls"),
     PARETO_MODES.map((m) => [m.key, m.label]),
@@ -811,7 +890,7 @@ function renderAlignment(app, data, label) {
     const rows = currentRows().filter((r) => bucket.codes.includes(r.c));
     box.innerHTML =
       `<div class="sector-head">${bucket.sector} · ${rows.length}종목</div>` +
-      `<div class="table-wrap">${signalTable(rows, data, state.paretoMode === "short")}</div>`;
+      `<div class="table-wrap">${signalTable(rows, data, state.paretoMode === "short", { sort: state.sort })}</div>`;
   }
 
   function drawPareto() {
@@ -839,16 +918,26 @@ function renderAlignment(app, data, label) {
     drawSectorDetail(state.sector ? buckets.find((b) => b.sector === state.sector) : null);
   }
 
-  function draw() {
+  function drawTables() {
     const rows = currentRows();
     const fullRows = rows.filter((r) => r.f);
-    const prevDate = data.dates[data.dates.indexOf(state.date) - 1];
-    const prevRows = prevDate ? data.snapshots[prevDate] : null;
+    const opts = { sort: state.sort, group: state.group };
+
+    Object.entries(sortBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.sort));
+    groupBtn.classList.toggle("active", state.group);
 
     q(".short-count").textContent = `${rows.length}종목`;
     q(".full-count").textContent = `${fullRows.length}종목`;
-    q(".short-table").innerHTML = signalTable(rows, data, true);
-    q(".full-table").innerHTML = signalTable(fullRows, data, false);
+    q(".short-table").innerHTML = signalTable(rows, data, true, opts);
+    q(".full-table").innerHTML = signalTable(fullRows, data, false, opts);
+  }
+
+  function draw() {
+    const rows = currentRows();
+    const prevDate = data.dates[data.dates.indexOf(state.date) - 1];
+    const prevRows = prevDate ? data.snapshots[prevDate] : null;
+
+    drawTables();
     q(".short-dropped").innerHTML = droppedStrip(prevRows, rows, data, false);
     q(".full-dropped").innerHTML = droppedStrip(prevRows, rows, data, true);
 
