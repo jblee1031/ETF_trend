@@ -151,6 +151,67 @@
   .dropped a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--border); }
   .dropped a:hover { color: var(--accent); border-bottom-color: var(--accent); }
   .dropped .held { color: #6b7285; margin-left: 3px; }
+  tbody td.sector { text-align: left; color: var(--muted); }
+  .formula {
+    background: #12151c;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text);
+    overflow-x: auto;
+  }
+  .formula .lead { color: var(--muted); font-family: inherit; }
+  .formula .term { color: #7ee2a8; }
+  .mv-cards { display: flex; flex-direction: column; gap: 10px; }
+  .mv-card {
+    display: flex;
+    gap: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .mv-rank {
+    flex: 0 0 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mv-body { flex: 1; min-width: 0; }
+  .mv-name { font-size: 14px; font-weight: 600; }
+  .mv-name a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  .mv-name a:hover { color: var(--accent); }
+  .mv-meta { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 6px; }
+  .mv-score { font-size: 12px; color: #ffb03a; margin-top: 3px; font-family: ui-monospace, Consolas, monospace; }
+  .mv-terms { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .mv-checks {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .mv-checks li::before { content: "✓ "; color: #7ee2a8; }
+  .mv-checks li.miss { color: #6b7285; }
+  .mv-checks li.miss::before { content: "✕ "; color: #ff7a7a; }
+  .sector-head {
+    margin: 14px 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
   tbody td a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
   tbody td a:hover { color: var(--accent); border-bottom-color: var(--accent); }
   .badge {
@@ -175,11 +236,13 @@
   <button id="tab-btn-kr" class="active" data-tab="kr">국내 ETF</button>
   <button id="tab-btn-us" data-tab="us">미국 주식/ETF</button>
   <button id="tab-btn-kospi" data-tab="kospi">코스피200 정배열</button>
+  <button id="tab-btn-kosdaq" data-tab="kosdaq">코스닥150 정배열</button>
 </nav>
 <main>
   <div id="app-kr" class="tab-panel active"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-us" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-kospi" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-kosdaq" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
 </main>
 
 <script>
@@ -396,35 +459,53 @@ async function loadMarket(containerId, groupsUrl, pricesUrl, currencySuffix) {
   }
 }
 
-// ---- 코스피200 정배열 탭 ----
+// ---- 정배열 탭 (코스피200 / 코스닥150 공용) ----
 
 const MA_LABELS = ["MA5", "MA10", "MA20", "MA60", "MA120"];
 const CHART_MAX_LINES = 20;
+const PARETO_MODES = [
+  { key: "short", label: "단기 정배열" },
+  { key: "full", label: "완전 정배열" },
+];
 
 function fnguideUrl(code) {
   return `https://wcomp.fnguide.com/?cmp_cd=${encodeURIComponent(code)}`;
 }
 
-function signalTable(rows, names, withFullBadge) {
+// 시가총액은 억원 단위로 들어온다.
+function fmtCap(cap) {
+  if (cap === null || cap === undefined) return "-";
+  if (cap >= 10000) return `${(cap / 10000).toFixed(1)}조`;
+  return `${fmtNum(cap)}억`;
+}
+
+function stockCell(code, data, extra) {
+  return (
+    `<td><a href="${fnguideUrl(code)}" target="_blank" rel="noopener">${data.names[code] || code}</a>${extra || ""}</td>` +
+    `<td class="sector">${data.sectors[code] || "-"}</td>` +
+    `<td>${fmtCap(data.caps[code])}</td>`
+  );
+}
+
+function signalTable(rows, data, withFullBadge) {
   if (!rows.length) return `<div class="empty">해당 조건을 만족하는 종목이 없습니다.</div>`;
-  let html = "<table><thead><tr><th>종목</th><th>종가</th><th>등락률</th>";
+  let html = "<table><thead><tr><th>종목</th><th>섹터</th><th>시가총액</th><th>종가</th><th>등락률</th>";
   MA_LABELS.forEach((m) => (html += `<th>${m}</th>`));
   html += "<th>연속일</th></tr></thead><tbody>";
   rows.forEach((r) => {
     const badge = withFullBadge && r.f ? `<span class="badge">완전정배열</span>` : "";
     const fresh = r.s === 1 ? `<span class="badge new">신규</span>` : "";
     const chgCls = r.r > 0 ? "up" : r.r < 0 ? "down" : "";
-    const streak = withFullBadge ? r.s : r.f;
-    html += `<tr><td><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${names[r.c] || r.c}</a>${badge}${fresh}</td>`;
+    html += `<tr>${stockCell(r.c, data, badge + fresh)}`;
     html += `<td>${fmtNum(r.p)}</td>`;
     html += `<td class="${chgCls}">${r.r === null ? "-" : (r.r > 0 ? "+" : "") + r.r.toFixed(2) + "%"}</td>`;
     r.m.forEach((v) => (html += `<td>${v === null ? "-" : fmtNum(v)}</td>`));
-    html += `<td>${streak}</td></tr>`;
+    html += `<td>${withFullBadge ? r.s : r.f}</td></tr>`;
   });
   return html + "</tbody></table>";
 }
 
-function droppedStrip(prevRows, currRows, names, fullOnly) {
+function droppedStrip(prevRows, currRows, data, fullOnly) {
   if (!prevRows) return "";
   const streakOf = (r) => (fullOnly ? r.f : r.s);
   const qualifies = (r) => (fullOnly ? r.f > 0 : true);
@@ -437,14 +518,14 @@ function droppedStrip(prevRows, currRows, names, fullOnly) {
     .sort((a, b) => streakOf(b) - streakOf(a))
     .map(
       (r) =>
-        `<span><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${names[r.c] || r.c}</a>` +
+        `<span><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${data.names[r.c] || r.c}</a>` +
         `<span class="held">${streakOf(r)}일 유지</span></span>`
     )
     .join("");
   return `<div class="dropped"><span class="label">전일 대비 편출 ${gone.length}종목</span>${items}</div>`;
 }
 
-function renderKospiChart(canvas, data, codes, period, metric, asOfDate) {
+function trendChart(canvas, data, codes, period, metric, asOfDate) {
   const cut = data.chart_dates.indexOf(asOfDate);
   const end = cut === -1 ? data.chart_dates.length : cut + 1;
   const periodDef = PERIODS.find((p) => p.key === period);
@@ -452,8 +533,7 @@ function renderKospiChart(canvas, data, codes, period, metric, asOfDate) {
   const start = end - dates.length;
 
   const datasets = codes.map((code, i) => {
-    const full = data.series[code] || [];
-    const window = full.slice(start, end);
+    const window = (data.series[code] || []).slice(start, end);
     let base = null;
     const values = window.map((v) => {
       if (v !== null && v !== undefined && base === null) base = v;
@@ -495,89 +575,301 @@ function renderKospiChart(canvas, data, codes, period, metric, asOfDate) {
   });
 }
 
-function renderKospi(app, data) {
+function paretoChart(canvas, buckets, onPick) {
+  const total = buckets.reduce((sum, b) => sum + b.codes.length, 0);
+  let running = 0;
+  const cumulative = buckets.map((b) => {
+    running += b.codes.length;
+    return (running / total) * 100;
+  });
+
+  return new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: buckets.map((b) => b.sector),
+      datasets: [
+        {
+          type: "bar",
+          label: "종목 수",
+          data: buckets.map((b) => b.codes.length),
+          backgroundColor: "#4f8cff",
+          hoverBackgroundColor: "#7aa8ff",
+          yAxisID: "y",
+          order: 2,
+        },
+        {
+          type: "line",
+          label: "누적 비중(%)",
+          data: cumulative,
+          borderColor: "#ffb03a",
+          backgroundColor: "#ffb03a",
+          borderWidth: 1.5,
+          pointRadius: 2,
+          yAxisID: "y1",
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      onClick: (_evt, elements) => {
+        if (elements.length) onPick(buckets[elements[0].index]);
+      },
+      onHover: (_evt, elements, chart) => {
+        chart.canvas.style.cursor = elements.length ? "pointer" : "default";
+      },
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#9aa1b1", boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) =>
+              ctx.dataset.type === "bar"
+                ? `종목 수: ${ctx.parsed.y}`
+                : `누적 비중: ${ctx.parsed.y.toFixed(1)}%`,
+          },
+        },
+      },
+      scales: {
+        x: { type: "category", ticks: { color: "#9aa1b1", maxRotation: 60, minRotation: 45, font: { size: 10 } }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: "#9aa1b1", precision: 0 }, grid: { color: "#1e222c" }, title: { display: true, text: "종목 수", color: "#9aa1b1" } },
+        y1: {
+          position: "right",
+          beginAtZero: true,
+          max: 100,
+          ticks: { color: "#ffb03a", callback: (v) => v + "%" },
+          grid: { drawOnChartArea: false },
+        },
+      },
+    },
+  });
+}
+
+// 마크 미네르비니 추세 템플릿(Trend Template)의 8개 조건. 순서는 원문 그대로.
+const MV_CRITERIA = [
+  "종가 > 150일선, 200일선",
+  "150일선 > 200일선",
+  "200일선 1개월 상승",
+  "50일선 > 150일선, 200일선",
+  "종가 > 50일선",
+  "52주 저점 대비 +30% 이상",
+  "52주 고점 대비 -25% 이내",
+  "RS ≥ 70",
+];
+
+// 8개 조건을 모두 통과한 종목끼리 줄을 세우기 위한 점수. 각 항을 0~100으로
+// 맞춘 뒤 가중합한다: 상대강도에 가장 큰 비중을, 신고가 근접도에 그다음을 둔다.
+function mvScore(t) {
+  const rs = t.rs ?? 0;
+  const nearHigh = 100 - t.hi;
+  const offLow = Math.min(t.lo, 200) / 2;
+  const slope = Math.min(Math.max(t.sl, 0), 10) * 10;
+  return 0.4 * rs + 0.3 * nearHigh + 0.15 * offLow + 0.15 * slope;
+}
+
+function mvCard(row, data, rank) {
+  const t = row.t;
+  const checks = MV_CRITERIA.map(
+    (label, i) => `<li class="${t.k[i] ? "" : "miss"}">${label}</li>`
+  ).join("");
+  return `
+    <div class="mv-card">
+      <div class="mv-rank">${rank}</div>
+      <div class="mv-body">
+        <div class="mv-name">
+          <a href="${fnguideUrl(row.c)}" target="_blank" rel="noopener">${data.names[row.c] || row.c}</a>
+          <span class="mv-meta">${data.sectors[row.c] || "-"} · ${fmtCap(data.caps[row.c])} · ${fmtNum(row.p)}원</span>
+        </div>
+        <div class="mv-score">Score ${mvScore(t).toFixed(1)}</div>
+        <div class="mv-terms">RS ${t.rs} · 고점이격 ${t.hi.toFixed(1)}% · 저점대비 +${t.lo.toFixed(1)}% · 200일선 기울기 ${t.sl > 0 ? "+" : ""}${t.sl.toFixed(2)}%</div>
+        <ul class="mv-checks">${checks}</ul>
+      </div>
+    </div>`;
+}
+
+function renderMinervini(box, countEl, rows, data) {
+  const scored = rows.filter((r) => r.t && r.t.n === 8);
+  countEl.textContent = `8개 조건 통과 ${scored.length}종목`;
+  if (!scored.length) {
+    box.innerHTML = `<div class="empty">8개 조건을 모두 통과한 종목이 없습니다.</div>`;
+    return;
+  }
+  const ranked = [...scored].sort((a, b) => mvScore(b.t) - mvScore(a.t));
+  box.innerHTML = ranked.map((r, i) => mvCard(r, data, i + 1)).join("");
+}
+
+function renderAlignment(app, data, label) {
   const dates = [...data.dates].reverse();
   app.innerHTML = `
     <div class="toolbar">
-      <label for="kospi-date">기준일</label>
-      <select id="kospi-date">${dates.map((d) => `<option value="${d}">${d}</option>`).join("")}</select>
-      <span class="note">코스피200 구성 ${data.universe_size}종목 · 종목명 클릭 시 FnGuide 기업정보</span>
+      <label>기준일</label>
+      <select class="date-pick">${dates.map((d) => `<option value="${d}">${d}</option>`).join("")}</select>
+      <span class="note">${label} 구성 ${data.universe_size}종목 · 종목명 클릭 시 FnGuide 기업정보</span>
     </div>
     <section class="group">
       <div class="group-head">
         <h2>1. 단기 정배열 <span class="rule">5일선 &gt; 10일선 &gt; 20일선</span></h2>
-        <span class="count" id="kospi-short-count"></span>
+        <span class="count short-count"></span>
       </div>
-      <div id="kospi-short-dropped"></div>
-      <div class="table-wrap" id="kospi-short"></div>
+      <div class="short-dropped"></div>
+      <div class="table-wrap short-table"></div>
     </section>
     <section class="group">
       <div class="group-head">
         <h2>2. 완전 정배열 <span class="rule">5일선 &gt; 10일선 &gt; 20일선 &gt; 60일선 &gt; 120일선</span></h2>
-        <span class="count" id="kospi-full-count"></span>
+        <span class="count full-count"></span>
       </div>
-      <div class="controls" id="kospi-controls"></div>
-      <div class="chart-wrap"><canvas id="kospi-canvas"></canvas></div>
-      <div id="kospi-full-dropped"></div>
-      <div class="table-wrap" id="kospi-full"></div>
+      <div class="controls trend-controls"></div>
+      <div class="chart-wrap"><canvas class="trend-canvas"></canvas></div>
+      <div class="full-dropped"></div>
+      <div class="table-wrap full-table"></div>
+    </section>
+    <section class="group">
+      <div class="group-head">
+        <h2>3. 섹터 분포 <span class="rule">막대를 클릭하면 해당 섹터 종목이 표시됩니다</span></h2>
+        <span class="count pareto-count"></span>
+      </div>
+      <div class="controls pareto-controls"></div>
+      <div class="chart-wrap"><canvas class="pareto-canvas"></canvas></div>
+      <div class="sector-detail"></div>
+    </section>
+    <section class="group">
+      <div class="group-head">
+        <h2>4. 미네르비니 추세 템플릿 <span class="rule">단기 정배열 종목 중 8개 조건을 모두 통과한 종목 (점수순)</span></h2>
+        <span class="count mv-count"></span>
+      </div>
+      <div class="formula">
+        <span class="lead">8개 조건을 모두 통과한 종목만 후보로 두고, 아래 점수로 순위를 매깁니다.</span><br>
+        Score = 0.40 × <span class="term">RS</span>
+              + 0.30 × <span class="term">(100 − 고점이격%)</span>
+              + 0.15 × <span class="term">min(저점이격%, 200) ÷ 2</span>
+              + 0.15 × <span class="term">min(max(200일선 기울기%, 0), 10) × 10</span><br>
+        <span class="lead">RS = 0.4·r(63일) + 0.2·r(126일) + 0.2·r(189일) + 0.2·r(252일) 의 유니버스 내 백분위 (0–99)</span><br>
+        <span class="lead">고점이격 = 1 − 종가/52주 최고가 · 저점이격 = 종가/52주 최저가 − 1 · 기울기 = 200일선의 22거래일 변화율</span>
+      </div>
+      <div class="mv-cards"></div>
     </section>`;
 
-  const select = app.querySelector("#kospi-date");
-  const controls = app.querySelector("#kospi-controls");
-  const canvas = app.querySelector("#kospi-canvas");
-  const state = { date: dates[0], period: "3m", metric: "pct" };
+  const q = (sel) => app.querySelector(sel);
+  const state = { date: dates[0], period: "3m", metric: "pct", paretoMode: "short", sector: null };
 
-  const periodBtns = {};
-  const metricBtns = {};
-  PERIODS.forEach((p) => {
-    const b = document.createElement("button");
-    b.textContent = p.label;
-    controls.appendChild(b);
-    periodBtns[p.key] = b;
-    b.addEventListener("click", () => { state.period = p.key; draw(); });
+  function makeButtons(container, items, onPick) {
+    const btns = {};
+    items.forEach(([key, text]) => {
+      const b = document.createElement("button");
+      b.textContent = text;
+      container.appendChild(b);
+      btns[key] = b;
+      b.addEventListener("click", () => onPick(key));
+    });
+    return btns;
+  }
+
+  const trendControls = q(".trend-controls");
+  const periodBtns = makeButtons(trendControls, PERIODS.map((p) => [p.key, p.label]), (k) => {
+    state.period = k;
+    drawTrend();
   });
   const sep = document.createElement("span");
   sep.style.width = "8px";
-  controls.appendChild(sep);
-  [["pct", "변동률(%)"], ["price", "종가(원)"]].forEach(([key, label]) => {
-    const b = document.createElement("button");
-    b.textContent = label;
-    controls.appendChild(b);
-    metricBtns[key] = b;
-    b.addEventListener("click", () => { state.metric = key; draw(); });
+  trendControls.appendChild(sep);
+  const metricBtns = makeButtons(trendControls, [["pct", "변동률(%)"], ["price", "종가(원)"]], (k) => {
+    state.metric = k;
+    drawTrend();
   });
+  const paretoBtns = makeButtons(
+    q(".pareto-controls"),
+    PARETO_MODES.map((m) => [m.key, m.label]),
+    (k) => {
+      state.paretoMode = k;
+      state.sector = null;
+      drawPareto();
+    }
+  );
 
-  let chart = null;
+  let trend = null;
+  let pareto = null;
+
+  function currentRows() {
+    return data.snapshots[state.date] || [];
+  }
+
+  function drawTrend() {
+    const fullRows = currentRows().filter((r) => r.f);
+    Object.entries(periodBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.period));
+    Object.entries(metricBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.metric));
+
+    if (trend) { trend.destroy(); trend = null; }
+    const codes = fullRows.slice(0, CHART_MAX_LINES).map((r) => r.c).filter((c) => data.series[c]);
+    if (codes.length) trend = trendChart(q(".trend-canvas"), data, codes, state.period, state.metric, state.date);
+  }
+
+  function drawSectorDetail(bucket) {
+    const box = q(".sector-detail");
+    if (!bucket) { box.innerHTML = ""; return; }
+    const rows = currentRows().filter((r) => bucket.codes.includes(r.c));
+    box.innerHTML =
+      `<div class="sector-head">${bucket.sector} · ${rows.length}종목</div>` +
+      `<div class="table-wrap">${signalTable(rows, data, state.paretoMode === "short")}</div>`;
+  }
+
+  function drawPareto() {
+    const rows = currentRows().filter((r) => (state.paretoMode === "full" ? r.f : true));
+    const bySector = new Map();
+    rows.forEach((r) => {
+      const sector = data.sectors[r.c] || "기타";
+      if (!bySector.has(sector)) bySector.set(sector, []);
+      bySector.get(sector).push(r.c);
+    });
+    const buckets = [...bySector.entries()]
+      .map(([sector, codes]) => ({ sector, codes }))
+      .sort((a, b) => b.codes.length - a.codes.length || a.sector.localeCompare(b.sector));
+
+    Object.entries(paretoBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.paretoMode));
+    q(".pareto-count").textContent = `${buckets.length}개 섹터 / ${rows.length}종목`;
+
+    if (pareto) { pareto.destroy(); pareto = null; }
+    if (buckets.length) {
+      pareto = paretoChart(q(".pareto-canvas"), buckets, (bucket) => {
+        state.sector = bucket.sector;
+        drawSectorDetail(bucket);
+      });
+    }
+    drawSectorDetail(state.sector ? buckets.find((b) => b.sector === state.sector) : null);
+  }
+
   function draw() {
-    const rows = data.snapshots[state.date] || [];
+    const rows = currentRows();
     const fullRows = rows.filter((r) => r.f);
     const prevDate = data.dates[data.dates.indexOf(state.date) - 1];
     const prevRows = prevDate ? data.snapshots[prevDate] : null;
 
-    app.querySelector("#kospi-short-count").textContent = `${rows.length}종목`;
-    app.querySelector("#kospi-full-count").textContent = `${fullRows.length}종목`;
-    app.querySelector("#kospi-short").innerHTML = signalTable(rows, data.names, true);
-    app.querySelector("#kospi-full").innerHTML = signalTable(fullRows, data.names, false);
-    app.querySelector("#kospi-short-dropped").innerHTML = droppedStrip(prevRows, rows, data.names, false);
-    app.querySelector("#kospi-full-dropped").innerHTML = droppedStrip(prevRows, rows, data.names, true);
+    q(".short-count").textContent = `${rows.length}종목`;
+    q(".full-count").textContent = `${fullRows.length}종목`;
+    q(".short-table").innerHTML = signalTable(rows, data, true);
+    q(".full-table").innerHTML = signalTable(fullRows, data, false);
+    q(".short-dropped").innerHTML = droppedStrip(prevRows, rows, data, false);
+    q(".full-dropped").innerHTML = droppedStrip(prevRows, rows, data, true);
 
-    Object.entries(periodBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.period));
-    Object.entries(metricBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.metric));
-
-    if (chart) { chart.destroy(); chart = null; }
-    const codes = fullRows.slice(0, CHART_MAX_LINES).map((r) => r.c).filter((c) => data.series[c]);
-    if (codes.length) chart = renderKospiChart(canvas, data, codes, state.period, state.metric, state.date);
+    drawTrend();
+    drawPareto();
+    renderMinervini(q(".mv-cards"), q(".mv-count"), rows, data);
   }
 
-  select.addEventListener("change", () => { state.date = select.value; draw(); });
+  q(".date-pick").addEventListener("change", (e) => {
+    state.date = e.target.value;
+    state.sector = null;
+    draw();
+  });
   draw();
 }
 
-async function loadKospi() {
-  const app = document.getElementById("app-kospi");
+async function loadAlignment(containerId, url, label) {
+  const app = document.getElementById(containerId);
   try {
-    const data = await fetch("data/kospi200_signals.json", { cache: "no-store" }).then((r) => r.json());
-    renderKospi(app, data);
+    const data = await fetch(url, { cache: "no-store" }).then((r) => r.json());
+    renderAlignment(app, data, label);
     return data.generated_at;
   } catch (err) {
     console.error(err);
@@ -600,15 +892,17 @@ function setupTabs() {
 
 async function main() {
   setupTabs();
-  const [krUpdatedAt, usUpdatedAt, kospiUpdatedAt] = await Promise.all([
+  const [krUpdatedAt, usUpdatedAt, kospiUpdatedAt, kosdaqUpdatedAt] = await Promise.all([
     loadMarket("app-kr", "data/groups.json", "data/prices.json", "원"),
     loadMarket("app-us", "data/us_groups.json", "data/us_prices.json", "$"),
-    loadKospi(),
+    loadAlignment("app-kospi", "data/kospi200_signals.json", "코스피200"),
+    loadAlignment("app-kosdaq", "data/kosdaq150_signals.json", "코스닥150"),
   ]);
   const parts = [];
   if (krUpdatedAt) parts.push("국내 " + new Date(krUpdatedAt).toLocaleString("ko-KR"));
   if (usUpdatedAt) parts.push("미국 " + new Date(usUpdatedAt).toLocaleString("ko-KR"));
   if (kospiUpdatedAt) parts.push("코스피200 " + new Date(kospiUpdatedAt).toLocaleString("ko-KR"));
+  if (kosdaqUpdatedAt) parts.push("코스닥150 " + new Date(kosdaqUpdatedAt).toLocaleString("ko-KR"));
   document.getElementById("updated-at").textContent = parts.length
     ? "마지막 업데이트 — " + parts.join(" / ")
     : "업데이트 시각을 불러오지 못했습니다.";

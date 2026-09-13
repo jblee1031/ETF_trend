@@ -1,4 +1,4 @@
-name: Update KOSPI200 MA Alignment
+name: Update KRX MA Alignment
 
 on:
   schedule:
@@ -25,17 +25,25 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      # Both markets run in one job so they produce a single commit; two
+      # workflows firing at the same time would race to push the same branch.
       - name: Build KOSPI200 alignment signals
         run: python scripts/fetch_kospi200.py
 
+      - name: Build KOSDAQ150 alignment signals
+        if: always()
+        run: python scripts/fetch_kosdaq150.py
+
       - name: Commit and push if changed
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/kospi200_signals.json data/kospi200_tickers.json
+          git add data/kospi200_signals.json data/kospi200_tickers.json \
+                  data/kosdaq150_signals.json data/kosdaq150_tickers.json
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: update KOSPI200 alignment signals ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git commit -m "chore: update KRX alignment signals ($(date -u +'%Y-%m-%d %H:%M UTC'))"
             git push
           fi
