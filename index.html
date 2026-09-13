@@ -108,6 +108,46 @@
   .tabs button.active { background: var(--panel); color: var(--text); border-bottom-color: var(--panel); }
   .tab-panel { display: none; }
   .tab-panel.active { display: flex; flex-direction: column; gap: 28px; }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .toolbar label { font-size: 13px; color: var(--muted); }
+  .toolbar select {
+    background: #1e222c;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 13px;
+  }
+  .toolbar .note { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .rule {
+    font-size: 12px;
+    color: var(--muted);
+    margin: -4px 0 10px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  tbody td a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  tbody td a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 5px;
+    font-size: 10px;
+    border-radius: 4px;
+    background: #2d4a33;
+    color: #7ee2a8;
+  }
+  .badge.new { background: #4a3a2d; color: #ffc07a; }
+  .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -118,10 +158,12 @@
 <nav class="tabs">
   <button id="tab-btn-kr" class="active" data-tab="kr">국내 ETF</button>
   <button id="tab-btn-us" data-tab="us">미국 주식/ETF</button>
+  <button id="tab-btn-kospi" data-tab="kospi">코스피200 정배열</button>
 </nav>
 <main>
   <div id="app-kr" class="tab-panel active"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-us" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-kospi" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
 </main>
 
 <script>
@@ -338,6 +380,166 @@ async function loadMarket(containerId, groupsUrl, pricesUrl, currencySuffix) {
   }
 }
 
+// ---- 코스피200 정배열 탭 ----
+
+const MA_LABELS = ["MA5", "MA10", "MA20", "MA60", "MA120"];
+const CHART_MAX_LINES = 20;
+
+function fnguideUrl(code) {
+  return `https://wcomp.fnguide.com/?cmp_cd=${encodeURIComponent(code)}`;
+}
+
+function signalTable(rows, names, withFullBadge) {
+  if (!rows.length) return `<div class="empty">해당 조건을 만족하는 종목이 없습니다.</div>`;
+  let html = "<table><thead><tr><th>종목</th><th>종가</th><th>등락률</th>";
+  MA_LABELS.forEach((m) => (html += `<th>${m}</th>`));
+  html += "<th>연속일</th></tr></thead><tbody>";
+  rows.forEach((r) => {
+    const badge = withFullBadge && r.f ? `<span class="badge">완전정배열</span>` : "";
+    const fresh = r.s === 1 ? `<span class="badge new">신규</span>` : "";
+    const chgCls = r.r > 0 ? "up" : r.r < 0 ? "down" : "";
+    const streak = withFullBadge ? r.s : r.f;
+    html += `<tr><td><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${names[r.c] || r.c}</a>${badge}${fresh}</td>`;
+    html += `<td>${fmtNum(r.p)}</td>`;
+    html += `<td class="${chgCls}">${r.r === null ? "-" : (r.r > 0 ? "+" : "") + r.r.toFixed(2) + "%"}</td>`;
+    r.m.forEach((v) => (html += `<td>${v === null ? "-" : fmtNum(v)}</td>`));
+    html += `<td>${streak}</td></tr>`;
+  });
+  return html + "</tbody></table>";
+}
+
+function renderKospiChart(canvas, data, codes, period, metric, asOfDate) {
+  const cut = data.chart_dates.indexOf(asOfDate);
+  const end = cut === -1 ? data.chart_dates.length : cut + 1;
+  const periodDef = PERIODS.find((p) => p.key === period);
+  const dates = sliceDates(data.chart_dates.slice(0, end), periodDef.days);
+  const start = end - dates.length;
+
+  const datasets = codes.map((code, i) => {
+    const full = data.series[code] || [];
+    const window = full.slice(start, end);
+    let base = null;
+    const values = window.map((v) => {
+      if (v !== null && v !== undefined && base === null) base = v;
+      if (v === null || v === undefined) return null;
+      return metric === "pct" ? (v / base) * 100 : v;
+    });
+    return {
+      label: data.names[code] || code,
+      data: values,
+      borderColor: colorFor(i),
+      backgroundColor: colorFor(i),
+      borderWidth: 1.5,
+      pointRadius: 0,
+      spanGaps: true,
+      tension: 0.15,
+    };
+  });
+
+  return new Chart(canvas, {
+    type: "line",
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#9aa1b1", boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${fmtNum(ctx.parsed.y)}${metric === "pct" ? "" : "원"}`,
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: "#9aa1b1", maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { color: "#1e222c" } },
+        y: { ticks: { color: "#9aa1b1" }, grid: { color: "#1e222c" } },
+      },
+    },
+  });
+}
+
+function renderKospi(app, data) {
+  const dates = [...data.dates].reverse();
+  app.innerHTML = `
+    <div class="toolbar">
+      <label for="kospi-date">기준일</label>
+      <select id="kospi-date">${dates.map((d) => `<option value="${d}">${d}</option>`).join("")}</select>
+      <span class="note">코스피200 구성 ${data.universe_size}종목 · 종목명 클릭 시 FnGuide 기업정보</span>
+    </div>
+    <section class="group">
+      <div class="group-head"><h2>1. 단기 정배열</h2><span class="count" id="kospi-short-count"></span></div>
+      <div class="rule">MA5 &gt; MA10 &gt; MA20</div>
+      <div class="table-wrap" id="kospi-short"></div>
+    </section>
+    <section class="group">
+      <div class="group-head"><h2>2. 완전 정배열</h2><span class="count" id="kospi-full-count"></span></div>
+      <div class="rule">MA5 &gt; MA10 &gt; MA20 &gt; MA60 &gt; MA120</div>
+      <div class="controls" id="kospi-controls"></div>
+      <div class="chart-wrap"><canvas id="kospi-canvas"></canvas></div>
+      <div class="table-wrap" id="kospi-full"></div>
+    </section>`;
+
+  const select = app.querySelector("#kospi-date");
+  const controls = app.querySelector("#kospi-controls");
+  const canvas = app.querySelector("#kospi-canvas");
+  const state = { date: dates[0], period: "3m", metric: "pct" };
+
+  const periodBtns = {};
+  const metricBtns = {};
+  PERIODS.forEach((p) => {
+    const b = document.createElement("button");
+    b.textContent = p.label;
+    controls.appendChild(b);
+    periodBtns[p.key] = b;
+    b.addEventListener("click", () => { state.period = p.key; draw(); });
+  });
+  const sep = document.createElement("span");
+  sep.style.width = "8px";
+  controls.appendChild(sep);
+  [["pct", "변동률(%)"], ["price", "종가(원)"]].forEach(([key, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    controls.appendChild(b);
+    metricBtns[key] = b;
+    b.addEventListener("click", () => { state.metric = key; draw(); });
+  });
+
+  let chart = null;
+  function draw() {
+    const rows = data.snapshots[state.date] || [];
+    const fullRows = rows.filter((r) => r.f);
+
+    app.querySelector("#kospi-short-count").textContent = `${rows.length}종목`;
+    app.querySelector("#kospi-full-count").textContent = `${fullRows.length}종목`;
+    app.querySelector("#kospi-short").innerHTML = signalTable(rows, data.names, true);
+    app.querySelector("#kospi-full").innerHTML = signalTable(fullRows, data.names, false);
+
+    Object.entries(periodBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.period));
+    Object.entries(metricBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.metric));
+
+    if (chart) { chart.destroy(); chart = null; }
+    const codes = fullRows.slice(0, CHART_MAX_LINES).map((r) => r.c).filter((c) => data.series[c]);
+    if (codes.length) chart = renderKospiChart(canvas, data, codes, state.period, state.metric, state.date);
+  }
+
+  select.addEventListener("change", () => { state.date = select.value; draw(); });
+  draw();
+}
+
+async function loadKospi() {
+  const app = document.getElementById("app-kospi");
+  try {
+    const data = await fetch("data/kospi200_signals.json", { cache: "no-store" }).then((r) => r.json());
+    renderKospi(app, data);
+    return data.generated_at;
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = `<div class="error">데이터를 불러오지 못했습니다: ${err.message}</div>`;
+    return null;
+  }
+}
+
 function setupTabs() {
   const buttons = document.querySelectorAll(".tabs button");
   buttons.forEach((btn) => {
@@ -352,13 +554,15 @@ function setupTabs() {
 
 async function main() {
   setupTabs();
-  const [krUpdatedAt, usUpdatedAt] = await Promise.all([
+  const [krUpdatedAt, usUpdatedAt, kospiUpdatedAt] = await Promise.all([
     loadMarket("app-kr", "data/groups.json", "data/prices.json", "원"),
     loadMarket("app-us", "data/us_groups.json", "data/us_prices.json", "$"),
+    loadKospi(),
   ]);
   const parts = [];
   if (krUpdatedAt) parts.push("국내 " + new Date(krUpdatedAt).toLocaleString("ko-KR"));
   if (usUpdatedAt) parts.push("미국 " + new Date(usUpdatedAt).toLocaleString("ko-KR"));
+  if (kospiUpdatedAt) parts.push("코스피200 " + new Date(kospiUpdatedAt).toLocaleString("ko-KR"));
   document.getElementById("updated-at").textContent = parts.length
     ? "마지막 업데이트 — " + parts.join(" / ")
     : "업데이트 시각을 불러오지 못했습니다.";

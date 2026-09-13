@@ -1,0 +1,41 @@
+name: Update KOSPI200 MA Alignment
+
+on:
+  schedule:
+    # 21:00 KST daily -> 12:00 UTC. Well after the 15:30 KST close, so the
+    # signals are ready to look at in the evening.
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Build KOSPI200 alignment signals
+        run: python scripts/fetch_kospi200.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/kospi200_signals.json data/kospi200_tickers.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update KOSPI200 alignment signals ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
+          fi

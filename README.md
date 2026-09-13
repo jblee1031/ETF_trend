@@ -1,25 +1,41 @@
 # ETF Trend Dashboard
 
-국내(KRX) 상장 ETF와 미국 주식/ETF를 그룹별로 묶어서 종가 트렌드 차트와 종가 테이블을 보여주는 정적 웹 대시보드입니다.
+국내(KRX) 상장 ETF, 미국 주식/ETF, 코스피200 이동평균선 정배열 종목을 한 곳에서 보는 정적 웹 대시보드입니다.
 GitHub Actions가 각 시장 마감 후 자동으로 데이터를 갱신하고, GitHub Pages로 웹에서 바로 볼 수 있습니다.
 
 ## 구성
 
-| 시장 | 그룹 정의 | 수집 데이터 | 수집 스크립트 | 데이터 소스 |
+| 탭 | 종목 정의 | 수집 데이터 | 수집 스크립트 | 데이터 소스 |
 |---|---|---|---|---|
 | 국내 ETF | `data/groups.json` | `data/prices.json` | `scripts/fetch_prices.py` | 네이버 금융 |
 | 미국 주식/ETF | `data/us_groups.json` | `data/us_prices.json` | `scripts/fetch_us_prices.py` | Yahoo Finance |
+| 코스피200 정배열 | 자동 수집 (`data/kospi200_tickers.json`에 기록) | `data/kospi200_signals.json` | `scripts/fetch_kospi200.py` | 네이버 금융 |
 
-- `index.html` — 국내/미국 탭 전환, 그룹별 차트 + 종가 테이블 렌더링 (Chart.js 사용, 별도 빌드 과정 없음)
+- `index.html` — 탭 전환 + 차트/테이블 렌더링 (Chart.js 사용, 별도 빌드 과정 없음)
 - `.github/workflows/update.yml` — 국내용, 평일 15:40 KST 자동 실행
 - `.github/workflows/update_us.yml` — 미국용, 평일 06:30 KST 자동 실행
-- 그룹/종목 정의 파일(`*_groups.json`)만 수정하면 그룹·종목을 바로 바꿀 수 있습니다. `prices.json`류는 워크플로우가 덮어쓰므로 직접 수정하지 마세요.
+- `.github/workflows/update_kospi200.yml` — 코스피200용, 매일 21:00 KST 자동 실행
+- 그룹/종목 정의 파일(`*_groups.json`)만 수정하면 그룹·종목을 바로 바꿀 수 있습니다. `prices.json`·`kospi200_*.json`류는 워크플로우가 덮어쓰므로 직접 수정하지 마세요.
+
+## 코스피200 정배열 탭
+
+코스피200 구성종목 전체를 대상으로 5·10·20·60·120일 이동평균선을 계산해, 두 가지 조건으로 종목을 추려 보여줍니다.
+
+1. **단기 정배열** — `MA5 > MA10 > MA20`
+2. **완전 정배열** — `MA5 > MA10 > MA20 > MA60 > MA120` (해당 종목들의 종가 트렌드 차트 포함)
+
+- 상단 **기준일** 드롭다운으로 최근 60거래일 중 아무 날이나 골라 "그날 기준 정배열이었던 종목"을 조회할 수 있습니다. 차트도 선택한 기준일까지만 그려집니다.
+- **연속일** 컬럼은 해당 조건이 며칠째 유지되고 있는지를 뜻하며, 당일 새로 진입한 종목에는 `신규` 배지가 붙습니다.
+- 종목명을 클릭하면 [FnGuide Company Guide](https://wcomp.fnguide.com/)의 해당 종목 기업정보 페이지가 새 탭으로 열립니다.
+- 매 실행마다 원본 시세에서 전체 스냅샷을 다시 계산하므로, 워크플로우가 하루 걸러도 과거 데이터에 구멍이 생기지 않습니다.
+- 구성종목 리스트는 매 실행 시 네이버 금융에서 새로 수집합니다. 수집이 실패하면 마지막으로 저장된 `data/kospi200_tickers.json`을 사용해 계속 동작합니다.
 
 ## 자동 업데이트
 
-- **국내**: 매 평일 **15:40 KST** (국내 장마감 15:30 이후)
-- **미국**: 매 평일 **06:30 KST** (미 동부 16:00 마감 기준, 서머타임(EDT)이든 표준시(EST)든 여유 있게 반영되는 시각)
-- 두 워크플로우 모두 GitHub Actions가 데이터를 갱신하고 자동 커밋/푸시하면, GitHub Pages가 `main` 브랜치 push를 감지해 자동 재배포합니다.
+- **국내 ETF**: 매 평일 **15:40 KST** (국내 장마감 15:30 이후)
+- **미국 주식/ETF**: 매 평일 **06:30 KST** (미 동부 16:00 마감 기준, 서머타임(EDT)이든 표준시(EST)든 여유 있게 반영되는 시각)
+- **코스피200 정배열**: **매일 21:00 KST** (퇴근 후 확인용)
+- 세 워크플로우 모두 GitHub Actions가 데이터를 갱신하고 자동 커밋/푸시하면, GitHub Pages가 `main` 브랜치 push를 감지해 자동 재배포합니다.
 - 데이터에 변경이 없으면(휴장일 등) 커밋하지 않습니다.
 - GitHub 정책상 **60일간 저장소에 아무 활동이 없으면 스케줄 워크플로우가 자동 비활성화**됩니다. 두 워크플로우가 평일마다 커밋을 만들기 때문에 정상적으로는 계속 활성 상태가 유지됩니다.
 - Actions 탭에서 각 워크플로우를 "Run workflow"로 수동 실행할 수도 있습니다.
@@ -28,8 +44,9 @@ GitHub Actions가 각 시장 마감 후 자동으로 데이터를 갱신하고, 
 
 ```bash
 pip install -r requirements.txt
-python scripts/fetch_prices.py      # data/prices.json 갱신 (국내)
+python scripts/fetch_prices.py      # data/prices.json 갱신 (국내 ETF)
 python scripts/fetch_us_prices.py   # data/us_prices.json 갱신 (미국)
+python scripts/fetch_kospi200.py    # data/kospi200_signals.json 갱신 (코스피200, 약 2분 소요)
 python -m http.server 8000          # 아무 정적 서버든 사용 가능
 # 브라우저에서 http://localhost:8000 접속
 ```
@@ -53,6 +70,7 @@ python -m http.server 8000          # 아무 정적 서버든 사용 가능
 ## 그룹/종목 추가·수정
 
 - 국내: `data/groups.json`에 그룹을 추가하거나 종목을 넣고 빼면 됩니다. 코드는 KRX 종목코드(6자리 숫자 또는 영문 포함 코드, 예: `0072R0`)를 그대로 사용합니다.
+- 코스피200 탭은 구성종목을 자동 수집하므로 수정할 게 없습니다. 분기 리밸런싱도 다음 실행에 자동 반영됩니다.
 - 미국: `data/us_groups.json`에서 수정합니다. 코드는 Yahoo Finance 티커 심볼입니다 (예: `AAPL`, `BRK-A`). 국내 증권사 앱에서 보이는 코드(`NDAAPL`, `NYUBER` 등)는 거래소 접두사(ND=나스닥, NY=NYSE, NA=NYSE American)를 뺀 나머지가 실제 티커입니다.
 
 ## 향후 확장
