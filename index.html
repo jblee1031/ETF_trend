@@ -131,10 +131,26 @@
   .toolbar .note { font-size: 12px; color: var(--muted); margin-left: auto; }
   .rule {
     font-size: 12px;
+    font-weight: 400;
     color: var(--muted);
-    margin: -4px 0 10px;
+    margin-left: 8px;
     font-family: ui-monospace, Consolas, monospace;
   }
+  .dropped {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .dropped .label { color: #ff9a9a; font-weight: 600; }
+  .dropped a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--border); }
+  .dropped a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .dropped .held { color: #6b7285; margin-left: 3px; }
   tbody td a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
   tbody td a:hover { color: var(--accent); border-bottom-color: var(--accent); }
   .badge {
@@ -408,6 +424,26 @@ function signalTable(rows, names, withFullBadge) {
   return html + "</tbody></table>";
 }
 
+function droppedStrip(prevRows, currRows, names, fullOnly) {
+  if (!prevRows) return "";
+  const streakOf = (r) => (fullOnly ? r.f : r.s);
+  const qualifies = (r) => (fullOnly ? r.f > 0 : true);
+
+  const stillIn = new Set(currRows.filter(qualifies).map((r) => r.c));
+  const gone = prevRows.filter((r) => qualifies(r) && !stillIn.has(r.c));
+  if (!gone.length) return "";
+
+  const items = gone
+    .sort((a, b) => streakOf(b) - streakOf(a))
+    .map(
+      (r) =>
+        `<span><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${names[r.c] || r.c}</a>` +
+        `<span class="held">${streakOf(r)}일 유지</span></span>`
+    )
+    .join("");
+  return `<div class="dropped"><span class="label">전일 대비 편출 ${gone.length}종목</span>${items}</div>`;
+}
+
 function renderKospiChart(canvas, data, codes, period, metric, asOfDate) {
   const cut = data.chart_dates.indexOf(asOfDate);
   const end = cut === -1 ? data.chart_dates.length : cut + 1;
@@ -468,15 +504,21 @@ function renderKospi(app, data) {
       <span class="note">코스피200 구성 ${data.universe_size}종목 · 종목명 클릭 시 FnGuide 기업정보</span>
     </div>
     <section class="group">
-      <div class="group-head"><h2>1. 단기 정배열</h2><span class="count" id="kospi-short-count"></span></div>
-      <div class="rule">MA5 &gt; MA10 &gt; MA20</div>
+      <div class="group-head">
+        <h2>1. 단기 정배열 <span class="rule">5일선 &gt; 10일선 &gt; 20일선</span></h2>
+        <span class="count" id="kospi-short-count"></span>
+      </div>
+      <div id="kospi-short-dropped"></div>
       <div class="table-wrap" id="kospi-short"></div>
     </section>
     <section class="group">
-      <div class="group-head"><h2>2. 완전 정배열</h2><span class="count" id="kospi-full-count"></span></div>
-      <div class="rule">MA5 &gt; MA10 &gt; MA20 &gt; MA60 &gt; MA120</div>
+      <div class="group-head">
+        <h2>2. 완전 정배열 <span class="rule">5일선 &gt; 10일선 &gt; 20일선 &gt; 60일선 &gt; 120일선</span></h2>
+        <span class="count" id="kospi-full-count"></span>
+      </div>
       <div class="controls" id="kospi-controls"></div>
       <div class="chart-wrap"><canvas id="kospi-canvas"></canvas></div>
+      <div id="kospi-full-dropped"></div>
       <div class="table-wrap" id="kospi-full"></div>
     </section>`;
 
@@ -509,11 +551,15 @@ function renderKospi(app, data) {
   function draw() {
     const rows = data.snapshots[state.date] || [];
     const fullRows = rows.filter((r) => r.f);
+    const prevDate = data.dates[data.dates.indexOf(state.date) - 1];
+    const prevRows = prevDate ? data.snapshots[prevDate] : null;
 
     app.querySelector("#kospi-short-count").textContent = `${rows.length}종목`;
     app.querySelector("#kospi-full-count").textContent = `${fullRows.length}종목`;
     app.querySelector("#kospi-short").innerHTML = signalTable(rows, data.names, true);
     app.querySelector("#kospi-full").innerHTML = signalTable(fullRows, data.names, false);
+    app.querySelector("#kospi-short-dropped").innerHTML = droppedStrip(prevRows, rows, data.names, false);
+    app.querySelector("#kospi-full-dropped").innerHTML = droppedStrip(prevRows, rows, data.names, true);
 
     Object.entries(periodBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.period));
     Object.entries(metricBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.metric));
