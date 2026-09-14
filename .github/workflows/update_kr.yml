@@ -1,0 +1,65 @@
+name: Update Korea Data
+
+on:
+  schedule:
+    # 20:05 KST daily -> 11:05 UTC. GitHub only promises to queue the run at
+    # this time; start can lag by hours under load.
+    - cron: "5 11 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-kr
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      # One job for all three so they land in a single commit instead of
+      # separate workflows racing to push the same branch.
+      - name: Fetch Korea ETF prices
+        run: python scripts/fetch_prices.py
+
+      - name: Build KOSPI200 alignment signals
+        if: always()
+        run: python scripts/fetch_kospi200.py
+
+      - name: Build KOSDAQ150 alignment signals
+        if: always()
+        run: python scripts/fetch_kosdaq150.py
+
+      - name: Commit and push if changed
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/prices.json \
+                  data/kospi200_signals.json data/kospi200_tickers.json \
+                  data/kosdaq150_signals.json data/kosdaq150_tickers.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: update Korea data ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          # Another workflow may have pushed while this one ran.
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1

@@ -269,18 +269,39 @@ def template_checks(m, rs):
     ]
 
 
-def save_universe(path, universe):
+def write_if_changed(path, payload, **dump_kwargs):
+    """Write JSON unless the file already holds the same data.
+
+    generated_at is ignored in the comparison: the workflow retries several
+    times a day, and a timestamp-only change would otherwise commit each time.
+    """
+    def body(d):
+        return {k: v for k, v in d.items() if k != "generated_at"}
+
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                if body(json.load(f)) == body(payload):
+                    return False
+        except ValueError:
+            pass
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "generated_at": datetime.now(KST).isoformat(),
-                "tickers": [{"code": c, "name": n} for c, n in universe.items()],
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+        json.dump(payload, f, ensure_ascii=False, **dump_kwargs)
+    return True
+
+
+def save_universe(path, universe):
+    # Sorted by code: the sources list by market cap or weight, which reshuffles
+    # daily and would bury real index changes in the git history.
+    write_if_changed(
+        path,
+        {
+            "generated_at": datetime.now(KST).isoformat(),
+            "tickers": [{"code": c, "name": n} for c, n in sorted(universe.items())],
+        },
+        indent=2,
+    )
 
 
 def load_universe(path):
@@ -400,15 +421,14 @@ def build(market, fetch_universe, min_universe):
             for code in sorted(charted)
         },
     }
-    signals_path.parent.mkdir(parents=True, exist_ok=True)
-    with signals_path.open("w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, separators=(",", ":"))
+    changed = write_if_changed(signals_path, output, separators=(",", ":"))
 
     latest = snapshot_dates[-1]
     short_n = len(snapshots[latest])
     full_n = sum(1 for r in snapshots[latest] if r["f"])
     missing_sector = [c for c in per_stock if c not in sectors]
-    print(f"\nSaved {len(snapshot_dates)} snapshot dates to {signals_path}")
+    verb = "Saved" if changed else "Unchanged —"
+    print(f"\n{verb} {len(snapshot_dates)} snapshot dates in {signals_path}")
     print(f"Latest {latest}: {short_n} short-aligned, {full_n} fully aligned")
     print(f"Chart series: {len(output['series'])} stocks x {len(chart_dates)} days")
     if missing_sector:

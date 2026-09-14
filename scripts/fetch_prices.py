@@ -25,6 +25,8 @@ from pathlib import Path
 
 import requests
 
+from krx_alignment import write_if_changed
+
 ROOT = Path(__file__).resolve().parent.parent
 GROUPS_PATH = ROOT / "data" / "groups.json"
 OUTPUT_PATH = ROOT / "data" / "prices.json"
@@ -119,11 +121,8 @@ def main():
         "generated_at": datetime.now(KST).isoformat(),
         "tickers": result,
     }
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with OUTPUT_PATH.open("w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
-
-    print(f"\nSaved {len(result)} tickers to {OUTPUT_PATH}")
+    changed = write_if_changed(OUTPUT_PATH, output, indent=2)
+    print(f"\n{'Saved' if changed else 'Unchanged —'} {len(result)} tickers in {OUTPUT_PATH}")
     if failures:
         print(f"Failed tickers: {failures}", file=sys.stderr)
         # Don't fail the whole run for a handful of bad tickers; only fail

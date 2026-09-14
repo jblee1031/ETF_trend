@@ -37,7 +37,14 @@ jobs:
           git add data/us_prices.json
           if git diff --cached --quiet; then
             echo "No changes to commit"
-          else
-            git commit -m "chore: update US prices ($(date -u +'%Y-%m-%d %H:%M UTC'))"
-            git push
+            exit 0
           fi
+          git commit -m "chore: update US prices ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          # Scheduled runs start late, so the Korea workflow may push meanwhile.
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
