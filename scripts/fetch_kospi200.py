@@ -32,4 +32,5 @@ def fetch_universe(max_pages=40):
 
 
 if __name__ == "__main__":
-    ka.build("kospi200", fetch_universe, min_universe=100)
+    ka.build("kospi200", fetch_universe, min_universe=100,
+             index_symbol="KPI200", index_label="코스피200")

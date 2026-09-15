@@ -17,7 +17,7 @@ Output shape (data/<market>_signals.json):
         {
           "c": "005930",            # code
           "p": 259500,              # close
-          "r": -3.53,               # pct change vs previous close
+          "r": -3.53,               # official pct change vs the exchange base price
           "m": [ma5, ma10, ma20, ma60, ma120],
           "s": 3,                   # consecutive days of 5>10>20 alignment
           "f": 3                    # consecutive days of full alignment (0 = not full)
@@ -26,13 +26,24 @@ Output shape (data/<market>_signals.json):
       ]
     },
     "chart_dates": [...],
-    "series": {"005930": [71200, null, ...]}      # aligned with chart_dates
+    "series": {"005930": [71200, null, ...]},     # aligned with chart_dates
+    "index": {"label": "코스피200", "note": null,
+              "dates": [...], "closes": [...]},     # benchmark closes for the summary
+    "market": {                                    # whole universe, not just aligned rows
+      "2026-09-11": {
+        "adv": 48, "dec": 149, "flat": 3, "median": -1.19,
+        "gainers": [["000000", 7.73], ...],        # top 5 by daily change
+        "losers":  [["000000", -8.32], ...],
+        "sectors": [["전기제품", 5, 3.4], ...]      # [name, members, cap-weighted change], best first
+      }
+    }
   }
 
 A row exists only when 5>10>20 holds; "f" > 0 marks the full 5-line alignment.
 "series" covers just the stocks that reach full alignment at least once.
 """
 import json
+import statistics
 import sys
 import time
 import urllib.parse
@@ -311,7 +322,94 @@ def load_universe(path):
         return {t["code"]: t["name"] for t in json.load(f)["tickers"]}
 
 
-def build(market, fetch_universe, min_universe):
+INDEX_POINTS = 170   # 120-day MA and a 60-day window, even at the oldest snapshot date
+
+
+def fetch_index(symbol, label, note):
+    try:
+        history = fetch_history(symbol)[-INDEX_POINTS:]
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARN index {symbol} unavailable: {exc}", file=sys.stderr)
+        return None
+    if not history:
+        print(f"WARN index {symbol} returned no data", file=sys.stderr)
+        return None
+    return {
+        "label": label,
+        "note": note,
+        "dates": [d for d, _ in history],
+        "closes": [c for _, c in history],
+    }
+
+
+PRICE_LIST_URL = "https://m.stock.naver.com/api/stock/{code}/price?pageSize=60&page=1"
+
+
+def daily_changes(history, code):
+    """Daily % change per date, measured against the exchange's base price.
+
+    The base price is normally the previous close, so close-to-close is the
+    fallback. But the exchange occasionally sets it differently (on 2026-09-15
+    it differed for nearly every stock), and then close-to-close disagrees with
+    the official change and even breaks the ±30% price limit. Naver's daily
+    price list carries the official change for the last 60 sessions.
+    """
+    changes = {
+        history[i][0]: (history[i][1] / history[i - 1][1] - 1) * 100
+        for i in range(1, len(history))
+        if history[i - 1][1]
+    }
+    rows = get_json(PRICE_LIST_URL.format(code=code))
+    if not isinstance(rows, list):
+        print(f"WARN {code}: official daily changes unavailable, using close-to-close", file=sys.stderr)
+        return changes
+    for r in rows:
+        try:
+            changes[r["localTradedAt"][:10]] = float(r["fluctuationsRatio"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return changes
+
+
+def market_day(date, per_stock, sectors, caps):
+    """Breadth, top movers and sector moves for the whole universe on one date.
+
+    Sector moves are weighted by the latest market cap rather than each day's,
+    which is close enough over a 40-day window and avoids a cap history.
+    """
+    moves = {c: s["chg"][date] for c, s in per_stock.items() if date in s["chg"]}
+    if not moves:
+        return None
+    values = list(moves.values())
+    ranked = sorted(moves.items(), key=lambda kv: kv[1])
+
+    groups = {}
+    for code, move in moves.items():
+        groups.setdefault(sectors.get(code, "기타"), []).append((code, move))
+    sector_moves = []
+    for name, members in groups.items():
+        if len(members) < 2:
+            continue
+        weight = sum(caps.get(c, 0) for c, _ in members)
+        if weight:
+            avg = sum(m * caps.get(c, 0) for c, m in members) / weight
+        else:
+            avg = sum(m for _, m in members) / len(members)
+        sector_moves.append([name, len(members), round(avg, 2)])
+    sector_moves.sort(key=lambda s: -s[2])
+
+    return {
+        "adv": sum(1 for v in values if v > 0),
+        "dec": sum(1 for v in values if v < 0),
+        "flat": sum(1 for v in values if v == 0),
+        "median": round(statistics.median(values), 2),
+        "gainers": [[c, round(v, 2)] for c, v in ranked[::-1][:5] if v > 0],
+        "losers": [[c, round(v, 2)] for c, v in ranked[:5] if v < 0],
+        "sectors": sector_moves,
+    }
+
+
+def build(market, fetch_universe, min_universe, index_symbol, index_label, index_note=None):
     """Run the whole pipeline for one market and write its two data files."""
     tickers_path = DATA_DIR / f"{market}_tickers.json"
     signals_path = DATA_DIR / f"{market}_signals.json"
@@ -345,11 +443,17 @@ def build(market, fetch_universe, min_universe):
                 print(f"SKIP {code} {name}: only {len(history)} points", file=sys.stderr)
                 continue
             dates, rows = build_rows(history)
+            time.sleep(0.15)
+            changes = daily_changes(history, code)
+            for date, row in rows.items():
+                if date in changes:
+                    row["r"] = round(changes[date], 2)
             all_dates.update(dates)
             per_stock[code] = {
                 "rows": rows,
                 "closes": dict(history),
                 "template": template_metrics(history),
+                "chg": changes,
             }
             print(f"OK   {code} {name} ({len(rows)} aligned days)")
         except Exception as exc:  # noqa: BLE001
@@ -420,6 +524,8 @@ def build(market, fetch_universe, min_universe):
             code: [per_stock[code]["closes"].get(d) for d in chart_dates]
             for code in sorted(charted)
         },
+        "index": fetch_index(index_symbol, index_label, index_note),
+        "market": {date: market_day(date, per_stock, sectors, caps) for date in snapshot_dates},
     }
     changed = write_if_changed(signals_path, output, separators=(",", ":"))
 

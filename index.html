@@ -218,6 +218,47 @@
   .mv-checks li::before { content: "✓ "; color: #7ee2a8; }
   .mv-checks li.miss { color: #6b7285; }
   .mv-checks li.miss::before { content: "✕ "; color: #ff7a7a; }
+  .summary-lead {
+    font-size: 14px;
+    line-height: 1.7;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border-left: 3px solid var(--accent);
+    background: #12151c;
+    border-radius: 0 8px 8px 0;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .summary-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-width: 0;
+  }
+  .summary-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .summary-card .sub { font-size: 11px; color: #6b7285; margin-top: 6px; }
+  .mini { width: 100%; border-collapse: collapse; font-size: 12px; white-space: normal; }
+  .mini th, .mini td {
+    position: static;
+    background: none;
+    padding: 4px 6px;
+    border-bottom: 1px solid #1e222c;
+    text-align: right;
+    color: var(--text);
+  }
+  .mini th { color: var(--muted); font-weight: 500; }
+  .mini th:first-child, .mini td:first-child { text-align: left; color: var(--muted); }
+  .mini tr:hover td { background: none; }
+  .mini td.up { color: #ff5f5f; }
+  .mini td.down { color: #4f8cff; }
+  .mini td a { color: var(--text); }
+  .summary-list { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.8; }
+  .summary-list .hold { color: #6b7285; }
+  .summary-note { font-size: 11px; color: #6b7285; margin: 8px 0 0; }
   .sector-head {
     margin: 14px 0 8px;
     font-size: 13px;
@@ -753,6 +794,239 @@ function renderMinervini(box, countEl, rows, data) {
   box.innerHTML = ranked.map((r, i) => mvCard(r, data, i + 1)).join("");
 }
 
+// ---- 5. 시장 요약 ----
+
+function signedPct(v, digits = 2) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "-";
+  return `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`;
+}
+
+function pctCell(v) {
+  const cls = v > 0 ? "up" : v < 0 ? "down" : "";
+  return `<td class="${cls}">${signedPct(v)}</td>`;
+}
+
+function stockLink(code, data) {
+  return `<a href="${fnguideUrl(code)}" target="_blank" rel="noopener">${data.names[code] || code}</a>`;
+}
+
+function indexStats(index, date) {
+  if (!index || !index.dates.length) return null;
+  let i = index.dates.indexOf(date);
+  if (i === -1) i = index.dates.filter((d) => d <= date).length - 1;
+  if (i < 1) return null;
+  const c = index.closes;
+  const back = (n) => (i - n >= 0 ? (c[i] / c[i - n] - 1) * 100 : null);
+  const ma = (w) => (i + 1 >= w ? c.slice(i + 1 - w, i + 1).reduce((a, b) => a + b, 0) / w : null);
+  const from = Math.max(1, i - 59);
+  const hi = Math.max(...c.slice(from - 1, i + 1));
+  let bigMoves = 0;
+  for (let k = from; k <= i; k++) if (Math.abs(c[k] / c[k - 1] - 1) >= 0.06) bigMoves++;
+  const above = [];
+  const below = [];
+  [5, 20, 60, 120].forEach((w) => {
+    const m = ma(w);
+    if (m === null) return;
+    (c[i] >= m ? above : below).push(w);
+  });
+  return { close: c[i], chg: back(1), d5: back(5), d20: back(20), fromHi: (c[i] / hi - 1) * 100, above, below, bigMoves };
+}
+
+function maPosition(st) {
+  const join = (ws) => ws.join("·") + "일선";
+  if (!st.above.length) return "모든 이평선 아래";
+  if (!st.below.length) return "모든 이평선 위";
+  return `${join(st.above)} 위 / ${join(st.below)} 아래`;
+}
+
+function summarize(data, date) {
+  const at = data.dates.indexOf(date);
+  const rows = data.snapshots[date] || [];
+  const prevDate = at > 0 ? data.dates[at - 1] : null;
+  const prevRows = prevDate ? data.snapshots[prevDate] : null;
+  const market = data.market ? data.market[date] : null;
+  const ix = indexStats(data.index, date);
+
+  const counts = data.dates.slice(0, at + 1).map((d) => {
+    const rs = data.snapshots[d];
+    return { d, s: rs.length, f: rs.filter((r) => r.f).length, m: rs.filter((r) => r.t && r.t.n === 8).length };
+  });
+  const cur = counts[counts.length - 1];
+  const prev = counts.length > 1 ? counts[counts.length - 2] : null;
+
+  // consecutive same-direction moves in the short-alignment count, ending today
+  let streak = 0;
+  for (let k = counts.length - 1; k > 0; k--) {
+    const step = Math.sign(counts[k].s - counts[k - 1].s);
+    if (step === 0 || (streak !== 0 && step !== Math.sign(streak))) break;
+    streak += step;
+  }
+
+  const byCode = new Map(rows.map((r) => [r.c, r]));
+  const change = prevRows
+    ? {
+        newShort: rows.filter((r) => r.s === 1),
+        outShort: prevRows.filter((r) => !byCode.has(r.c)).sort((a, b) => b.s - a.s),
+        newFull: rows.filter((r) => r.f === 1),
+        outFull: prevRows.filter((r) => r.f && !(byCode.get(r.c) || {}).f).sort((a, b) => b.f - a.f),
+      }
+    : null;
+
+  const sectorCount = (d) => {
+    const m = new Map();
+    (data.snapshots[d] || []).forEach((r) => {
+      const s = data.sectors[r.c] || "기타";
+      m.set(s, (m.get(s) || 0) + 1);
+    });
+    return m;
+  };
+  const secToday = sectorCount(date);
+  const secBefore = at >= 5 ? sectorCount(data.dates[at - 5]) : null;
+  const topSector = [...secToday.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  // headline
+  const lead = [];
+  if (ix) lead.push(`<b>${data.index.label} ${signedPct(ix.chg)}</b>`);
+  if (market) {
+    const moved = market.adv + market.dec;
+    const decShare = moved ? market.dec / moved : 0;
+    const tone = decShare >= 0.65 ? "넓게 하락" : decShare <= 0.35 ? "넓게 상승" : "종목별로 엇갈림";
+    lead.push(`구성종목은 <b>${tone}</b> (상승 ${market.adv} / 하락 ${market.dec}, 중간값 ${signedPct(market.median)})`);
+  }
+  let headline = lead.length ? lead.join(", ") + "." : "";
+  if (ix && market && Math.abs(ix.chg) >= 0.3 && Math.abs(market.median) >= 0.3 && Math.sign(ix.chg) !== Math.sign(market.median)) {
+    headline += " 지수와 종목 중간값의 방향이 달라, 대형주 몇 종목이 지수를 끌고 간 날입니다.";
+  }
+  if (prev) {
+    const diff = cur.s - prev.s;
+    let s = ` 단기 정배열 ${prev.s}→<b>${cur.s}</b>(${diff >= 0 ? "+" : ""}${diff})`;
+    if (Math.abs(streak) >= 3) s += `, ${Math.abs(streak)}거래일 연속 ${streak > 0 ? "증가" : "감소"}`;
+    s += `, 완전 정배열 ${prev.f}→<b>${cur.f}</b>.`;
+    headline = (headline + s).trim();
+  }
+
+  // observations
+  const notes = [];
+  const recent = counts.slice(-10);
+  const peakFull = recent.reduce((a, b) => (b.f > a.f ? b : a), recent[0]);
+  if (peakFull && peakFull.f >= 4 && cur.f <= peakFull.f / 2 && peakFull.d !== date) {
+    notes.push(`완전 정배열이 ${peakFull.d.slice(5)} ${peakFull.f}종목에서 ${cur.f}종목으로 절반 이하로 줄었습니다.`);
+  }
+  if (change) {
+    const brokeBoth = change.outFull.filter((r) => !byCode.has(r.c));
+    if (brokeBoth.length >= 2) {
+      const who = brokeBoth.length === change.outFull.length
+        ? `${brokeBoth.length}종목 모두`
+        : `${change.outFull.length}종목 중 ${brokeBoth.length}종목은`;
+      notes.push(`완전 정배열에서 빠진 ${who} 단기 정배열까지 한 번에 깨졌습니다.`);
+    }
+    const longExits = change.outShort.filter((r) => r.s >= 10);
+    if (longExits.length) {
+      notes.push(`10일 이상 정배열을 유지하던 ${longExits.length}종목이 편출됐습니다: ${longExits.slice(0, 5).map((r) => `${stockLink(r.c, data)}(${r.s}일)`).join(", ")}.`);
+    }
+  }
+  if (topSector && rows.length >= 10 && topSector[1] / rows.length >= 0.3) {
+    notes.push(`단기 정배열 ${rows.length}종목 중 ${Math.round((topSector[1] / rows.length) * 100)}%가 <b>${topSector[0]}</b> 한 섹터입니다. 이 섹터가 흔들리면 정배열 수가 한꺼번에 줄 수 있습니다.`);
+  }
+  if (market && secBefore) {
+    const moveOf = new Map(market.sectors.map((s) => [s[0], s[2]]));
+    [...secToday.entries()]
+      .filter(([s, n]) => n > (secBefore.get(s) || 0) && (moveOf.get(s) ?? 0) <= -3)
+      .forEach(([s, n]) => {
+        notes.push(`<b>${s}</b> 섹터는 정배열 종목이 5거래일 전 ${secBefore.get(s) || 0}종목에서 ${n}종목으로 늘었는데, 오늘 섹터 등락이 ${signedPct(moveOf.get(s))}입니다.`);
+      });
+  }
+  if (ix && ix.bigMoves >= 5) {
+    notes.push(`최근 60거래일 중 지수가 하루 ±6% 넘게 움직인 날이 ${ix.bigMoves}일입니다. 5·10일선 기반 단기 정배열이 하루 만에 깨지기 쉬운 장입니다.`);
+  }
+
+  return { headline, ix, market, counts, change, secToday, secBefore, notes };
+}
+
+function renderSummary(box, data, date) {
+  const sm = summarize(data, date);
+  const cards = [];
+
+  if (sm.ix) {
+    const ix = sm.ix;
+    cards.push(`
+      <div class="summary-card">
+        <h3>지수 · ${data.index.label}</h3>
+        <table class="mini">
+          <tr><td>종가</td><td>${fmtNum(ix.close)}</td></tr>
+          <tr><td>당일</td>${pctCell(ix.chg)}</tr>
+          <tr><td>5거래일</td>${pctCell(ix.d5)}</tr>
+          <tr><td>20거래일</td>${pctCell(ix.d20)}</tr>
+          <tr><td>60거래일 고점 대비</td>${pctCell(ix.fromHi)}</tr>
+          <tr><td>이평선 위치</td><td>${maPosition(ix)}</td></tr>
+          <tr><td>60일 중 ±6% 이상 변동</td><td>${ix.bigMoves}일</td></tr>
+        </table>
+        ${data.index.note ? `<div class="sub">${data.index.note}</div>` : ""}
+      </div>`);
+  }
+
+  const recent = sm.counts.slice(-6);
+  cards.push(`
+    <div class="summary-card">
+      <h3>정배열 종목 수 추이</h3>
+      <table class="mini">
+        <tr><th>날짜</th><th>단기</th><th>완전</th><th>미네르비니</th></tr>
+        ${recent.map((c) => `<tr><td>${c.d.slice(5)}</td><td>${c.s}</td><td>${c.f}</td><td>${c.m}</td></tr>`).join("")}
+      </table>
+      ${sm.market ? `<div class="sub">구성종목 상승 ${sm.market.adv} · 하락 ${sm.market.dec} · 보합 ${sm.market.flat} · 중간값 ${signedPct(sm.market.median)}</div>` : ""}
+    </div>`);
+
+  if (sm.market) {
+    const secs = sm.market.sectors;
+    const best = secs.slice(0, 4);
+    const worst = secs.slice(-4).reverse().filter((s) => !best.includes(s));
+    const secRow = (s) => `<tr><td>${s[0]} <span class="hold">(${s[1]})</span></td>${pctCell(s[2])}</tr>`;
+    cards.push(`
+      <div class="summary-card">
+        <h3>섹터 등락 (시가총액 가중)</h3>
+        <table class="mini">
+          <tr><th>강세</th><th></th></tr>${best.map(secRow).join("")}
+          <tr><th>약세</th><th></th></tr>${worst.map(secRow).join("")}
+        </table>
+        <div class="sub">괄호는 섹터 내 종목 수 · 2종목 이상 섹터만</div>
+      </div>`);
+
+    const moverRow = ([c, v]) => `<tr><td>${stockLink(c, data)} <span class="hold">${data.sectors[c] || ""}</span></td>${pctCell(v)}</tr>`;
+    cards.push(`
+      <div class="summary-card">
+        <h3>등락률 상위 · 하위</h3>
+        <table class="mini">
+          <tr><th>상승</th><th></th></tr>${sm.market.gainers.map(moverRow).join("")}
+          <tr><th>하락</th><th></th></tr>${sm.market.losers.map(moverRow).join("")}
+        </table>
+      </div>`);
+  }
+
+  if (sm.change) {
+    const names = (list, days) =>
+      list.length
+        ? list.map((r) => `${stockLink(r.c, data)}${days ? ` <span class="hold">${days(r)}일</span>` : ""}`).join(", ")
+        : `<span class="hold">없음</span>`;
+    cards.push(`
+      <div class="summary-card">
+        <h3>전일 대비 정배열 변화</h3>
+        <ul class="summary-list">
+          <li>단기 신규 ${sm.change.newShort.length}: ${names(sm.change.newShort)}</li>
+          <li>단기 편출 ${sm.change.outShort.length}: ${names(sm.change.outShort, (r) => r.s)}</li>
+          <li>완전 신규 ${sm.change.newFull.length}: ${names(sm.change.newFull)}</li>
+          <li>완전 이탈 ${sm.change.outFull.length}: ${names(sm.change.outFull, (r) => r.f)}</li>
+        </ul>
+        <div class="sub">편출·이탈 옆 숫자는 빠지기 전까지 유지한 일수</div>
+      </div>`);
+  }
+
+  box.innerHTML = `
+    <div class="summary-lead">${sm.headline}</div>
+    <div class="summary-grid">${cards.join("")}</div>
+    ${sm.notes.length ? `<div class="summary-card"><h3>관찰 포인트</h3><ul class="summary-list">${sm.notes.map((n) => `<li>${n}</li>`).join("")}</ul></div>` : ""}
+    <p class="summary-note">기준일 데이터로 자동 생성한 요약입니다. 섹터 등락은 최신 시가총액으로 가중했고 유동주식 비율은 반영하지 않았습니다. 매매 권유가 아닙니다.</p>`;
+}
+
 function renderAlignment(app, data, label) {
   const dates = [...data.dates].reverse();
   app.innerHTML = `
@@ -807,6 +1081,12 @@ function renderAlignment(app, data, label) {
         <span class="lead">고점이격 = 1 − 종가/52주 최고가 · 저점이격 = 종가/52주 최저가 − 1 · 기울기 = 200일선의 22거래일 변화율</span>
       </div>
       <div class="mv-cards"></div>
+    </section>
+    <section class="group">
+      <div class="group-head">
+        <h2>5. 시장 요약 <span class="rule">기준일 데이터로 자동 생성</span></h2>
+      </div>
+      <div class="market-summary"></div>
     </section>`;
 
   const q = (sel) => app.querySelector(sel);
@@ -944,6 +1224,7 @@ function renderAlignment(app, data, label) {
     drawTrend();
     drawPareto();
     renderMinervini(q(".mv-cards"), q(".mv-count"), rows, data);
+    renderSummary(q(".market-summary"), data, state.date);
   }
 
   q(".date-pick").addEventListener("change", (e) => {
