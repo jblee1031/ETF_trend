@@ -43,6 +43,7 @@ A row exists only when 5>10>20 holds; "f" > 0 marks the full 5-line alignment.
 "series" covers just the stocks that reach full alignment at least once.
 """
 import json
+import re
 import statistics
 import sys
 import time
@@ -71,6 +72,55 @@ INDUSTRY_URL = "https://m.stock.naver.com/api/stocks/industry"
 HEADERS = {"User-Agent": "Mozilla/5.0 (ETF-Trend-Dashboard data fetcher)"}
 MOBILE_HEADERS = {**HEADERS, "Referer": "https://m.stock.naver.com/"}
 KST = timezone(timedelta(hours=9))
+
+HOLDINGS_URL = "https://navercomp.wisereport.co.kr/v2/ETF/index.aspx?cmp_cd={code}"
+AUTOCOMPLETE_URL = "https://ac.stock.naver.com/ac"
+CU_DATA_RE = re.compile(r"var CU_data = (\{.*?\});", re.S)
+NON_STOCK = {"원화현금"}
+
+
+def etf_holdings(etf_code, retries=3):
+    """Stock names in an ETF's published creation-unit basket."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            resp = requests.get(HOLDINGS_URL.format(code=etf_code), headers=HEADERS, timeout=20)
+            resp.raise_for_status()
+            match = CU_DATA_RE.search(resp.text)
+            if not match:
+                raise RuntimeError("could not find CU_data in the ETF page")
+            rows = json.loads(match.group(1))["grid_data"]
+            return [r["STK_NM_KOR"] for r in rows if r["STK_NM_KOR"] not in NON_STOCK]
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            time.sleep(3 + attempt * 5)
+    raise RuntimeError(f"holdings for {etf_code} unavailable: {last_err}")
+
+
+def universe_from_etf(etf_code, market_type):
+    """Index membership read from a full-replication tracker ETF.
+
+    Neither exchange nor portal publishes the constituent lists openly any
+    more — KRX requires a login and Naver retired its KOSPI 200 page (HTTP 410,
+    2026-09-17) — but the tracker ETFs still publish their baskets. The basket
+    only has names, so each is resolved to a ticker through Naver's
+    autocomplete, restricted to the index's own market to avoid homonyms.
+    """
+    stocks = {}
+    unresolved = []
+    for name in etf_holdings(etf_code):
+        url = f"{AUTOCOMPLETE_URL}?q={urllib.parse.quote(name)}&target=stock"
+        data = get_json(url, headers={**HEADERS, "Referer": "https://finance.naver.com/"})
+        hits = [i for i in (data or {}).get("items", [])
+                if i.get("name") == name and i.get("typeCode") == market_type]
+        if hits:
+            stocks[hits[0]["code"]] = name
+        else:
+            unresolved.append(name)
+        time.sleep(0.1)
+    if unresolved:
+        print(f"WARN could not resolve tickers for: {unresolved}", file=sys.stderr)
+    return stocks
 
 
 def get_json(url, headers=MOBILE_HEADERS, timeout=10):

@@ -9,7 +9,7 @@ GitHub Actions가 각 시장 마감 후 자동으로 데이터를 갱신하고, 
 |---|---|---|---|---|
 | 국내 ETF | `data/groups.json` | `data/prices.json` | `scripts/fetch_prices.py` | 네이버 금융 |
 | 미국 주식/ETF | `data/us_groups.json` | `data/us_prices.json` | `scripts/fetch_us_prices.py` | Yahoo Finance |
-| 코스피200 정배열 | 자동 수집 (`data/kospi200_tickers.json`에 기록) | `data/kospi200_signals.json` | `scripts/fetch_kospi200.py` | 네이버 금융 |
+| 코스피200 정배열 | 자동 수집 (`data/kospi200_tickers.json`에 기록) | `data/kospi200_signals.json` | `scripts/fetch_kospi200.py` | KODEX 200 구성종목 + 네이버 금융 |
 | 코스닥150 정배열 | 자동 수집 (`data/kosdaq150_tickers.json`에 기록) | `data/kosdaq150_signals.json` | `scripts/fetch_kosdaq150.py` | KODEX 코스닥150 구성종목 + 네이버 금융 |
 
 - `index.html` — 탭 전환 + 차트/테이블 렌더링 (Chart.js 사용, 별도 빌드 과정 없음)
@@ -34,7 +34,7 @@ GitHub Actions가 각 시장 마감 후 자동으로 데이터를 갱신하고, 
 - **연속일** 컬럼은 해당 조건이 며칠째 유지되고 있는지를 뜻하며, 당일 새로 진입한 종목에는 `신규` 배지가 붙습니다. 반대로 전 거래일에는 있었으나 당일 빠진 종목은 테이블 위에 **편출** 목록으로 따로 표시됩니다.
 - 종목명을 클릭하면 [FnGuide Company Guide](https://wcomp.fnguide.com/)의 해당 종목 기업정보 페이지가 새 탭으로 열립니다.
 - 매 실행마다 원본 시세에서 전체 스냅샷을 다시 계산하므로, 워크플로우가 하루 걸러도 과거 데이터에 구멍이 생기지 않습니다.
-- 구성종목 리스트는 매 실행 시 새로 수집합니다. 수집이 실패하면 마지막으로 저장된 `*_tickers.json`을 사용해 계속 동작합니다.
+- 구성종목 리스트는 매 실행 시 새로 수집합니다. 거래소와 포털이 지수 구성종목을 공개하지 않아서(KRX는 로그인 필요, 네이버의 코스피200 편입종목 페이지는 2026-09-17 폐지), 지수를 완전 복제하는 ETF의 구성종목(코스피200 → KODEX 200, 코스닥150 → KODEX 코스닥150)을 가져와 종목명을 코드로 변환합니다. 수집이 실패하면 마지막으로 저장된 `*_tickers.json`을 사용해 계속 동작합니다.
 
 ### 미네르비니 추세 템플릿
 
