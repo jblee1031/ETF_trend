@@ -431,7 +431,10 @@ def market_day(date, per_stock, sectors, caps):
     if not moves:
         return None
     values = list(moves.values())
-    ranked = sorted(moves.items(), key=lambda kv: kv[1])
+    # Ties broken by code so the result doesn't depend on universe order, which
+    # differs between a fresh ETF basket and the saved fallback list.
+    rising = sorted(moves.items(), key=lambda kv: (-kv[1], kv[0]))
+    falling = sorted(moves.items(), key=lambda kv: (kv[1], kv[0]))
 
     groups = {}
     for code, move in moves.items():
@@ -446,15 +449,15 @@ def market_day(date, per_stock, sectors, caps):
         else:
             avg = sum(m for _, m in members) / len(members)
         sector_moves.append([name, len(members), round(avg, 2)])
-    sector_moves.sort(key=lambda s: -s[2])
+    sector_moves.sort(key=lambda s: (-s[2], s[0]))
 
     return {
         "adv": sum(1 for v in values if v > 0),
         "dec": sum(1 for v in values if v < 0),
         "flat": sum(1 for v in values if v == 0),
         "median": round(statistics.median(values), 2),
-        "gainers": [[c, round(v, 2)] for c, v in ranked[::-1][:5] if v > 0],
-        "losers": [[c, round(v, 2)] for c, v in ranked[:5] if v < 0],
+        "gainers": [[c, round(v, 2)] for c, v in rising[:5] if v > 0],
+        "losers": [[c, round(v, 2)] for c, v in falling[:5] if v < 0],
         "sectors": sector_moves,
     }
 
