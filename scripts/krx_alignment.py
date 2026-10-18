@@ -63,9 +63,10 @@ CHART_DAYS = 110       # close prices kept for the trend chart; covers a 3-month
                        # window even when the oldest snapshot date is selected
 SLOPE_LOOKBACK = 22    # ~1 month, for "is the 200-day average still rising"
 WEEKS52 = 250          # trading days standing in for a 52-week window
-# Enough history that MA200 exists SLOPE_LOOKBACK days before the oldest
-# snapshot date: 200 + 22 + 40, plus slack for holidays and halts.
-HISTORY_POINTS = 300
+# Long enough for the sector tab's 200-day average to cover the whole published
+# window (200 + SECTOR_DAYS), which also clears the alignment tab's needs
+# (MA200 SLOPE_LOOKBACK days before the oldest snapshot: 200 + 22 + 40).
+HISTORY_POINTS = 340
 
 CHART_URL = "https://fchart.stock.naver.com/sise.nhn"
 INDUSTRY_URL = "https://m.stock.naver.com/api/stocks/industry"
@@ -148,7 +149,11 @@ def fetch_history(code, retries=3):
 
 
 def parse_chart_xml(text):
-    """Pull date/close pairs out of <item data="date|open|high|low|close|volume" /> tags."""
+    """Candles from <item data="date|open|high|low|close|volume" /> tags.
+
+    Returns dicts with every field: the alignment maths only needs closes, but
+    the sector tab draws candles and volume from the same single fetch.
+    """
     history = []
     for line in text.splitlines():
         line = line.strip()
@@ -161,15 +166,28 @@ def parse_chart_xml(text):
         fields = line[start:line.find('"', start)].split("|")
         if len(fields) < 5:
             continue
-        raw_date, _open, _high, _low, close = fields[:5]
-        if not raw_date or not close:
+        raw_date = fields[0]
+        if not raw_date or not fields[4]:
             continue
         try:
-            close_val = float(close)
+            values = [float(v) for v in fields[1:5]]
         except ValueError:
             continue
-        history.append((f"{raw_date[0:4]}-{raw_date[4:6]}-{raw_date[6:8]}", close_val))
+        try:
+            volume = float(fields[5]) if len(fields) > 5 and fields[5] else 0.0
+        except ValueError:
+            volume = 0.0
+        history.append({
+            "date": f"{raw_date[0:4]}-{raw_date[4:6]}-{raw_date[6:8]}",
+            "open": values[0], "high": values[1], "low": values[2], "close": values[3],
+            "volume": volume,
+        })
     return history
+
+
+def close_pairs(history):
+    """(date, close) tuples — the shape the alignment maths works on."""
+    return [(row["date"], row["close"]) for row in history]
 
 
 def fetch_sector_and_cap():
@@ -207,6 +225,39 @@ def fetch_sector_and_cap():
             time.sleep(0.05)
         time.sleep(0.05)
     return sectors, caps
+
+
+OVERRIDES_PATH = DATA_DIR / "sector_overrides.json"
+
+
+def apply_sector_overrides(sectors, universe):
+    """Hand-edited sector fixes from data/sector_overrides.json.
+
+    Naver files pure holding companies under a subsidiary's industry — SK and GS
+    sit in 석유와가스, where together they outweigh the actual refiners — which
+    makes the sector index track the holdcos instead of the business.
+    """
+    if not OVERRIDES_PATH.exists():
+        return 0
+    try:
+        with OVERRIDES_PATH.open(encoding="utf-8") as f:
+            table = json.load(f)
+    except ValueError as exc:
+        print(f"WARN sector_overrides.json is not valid JSON ({exc}); ignoring", file=sys.stderr)
+        return 0
+
+    applied = 0
+    for code, entry in table.items():
+        if code.startswith("_"):
+            continue
+        target = entry.get("sector") if isinstance(entry, dict) else entry
+        if not target or code not in universe:
+            continue
+        if sectors.get(code) != target:
+            print(f"     reclassified {code} {universe[code]}: {sectors.get(code)} -> {target}")
+            sectors[code] = target
+            applied += 1
+    return applied
 
 
 def moving_averages(closes, windows=None):
@@ -377,7 +428,7 @@ INDEX_POINTS = 170   # 120-day MA and a 60-day window, even at the oldest snapsh
 
 def fetch_index(symbol, label, note):
     try:
-        history = fetch_history(symbol)[-INDEX_POINTS:]
+        history = close_pairs(fetch_history(symbol))[-INDEX_POINTS:]
     except Exception as exc:  # noqa: BLE001
         print(f"WARN index {symbol} unavailable: {exc}", file=sys.stderr)
         return None
@@ -462,6 +513,106 @@ def market_day(date, per_stock, sectors, caps):
     }
 
 
+SECTOR_DAYS = 130       # candles published per sector
+SECTOR_MIN_MEMBERS = 2  # a one-stock "sector" is just that stock
+SECTOR_MA_WINDOWS = [5, 10, 20, 60, 120, 200]
+
+
+def sector_series(per_stock, sectors, caps, axis, names=None, changes=None, publish=SECTOR_DAYS):
+    """Cap-weighted OHLC + traded value per sector, as an index based at 100.
+
+    Share counts come from the latest market cap and close, then stay fixed, so
+    the series is a Laspeyres index: it moves with prices, not with cap drift.
+    A member has to be trading at the start of the window to be included —
+    adding one midway would step the index for a reason that isn't price.
+    Missing days inside the window carry the previous close forward.
+    """
+    grouped = {}
+    for code, stock in per_stock.items():
+        sector = sectors.get(code)
+        candles = {row["date"]: row for row in stock["ohlc"]}
+        if not sector or axis[0] not in candles or not caps.get(code):
+            continue
+        grouped.setdefault(sector, []).append((code, candles))
+
+    out = {}
+    for sector, members in grouped.items():
+        if len(members) < SECTOR_MIN_MEMBERS:
+            continue
+        shares = {}
+        for code, candles in members:
+            last_close = candles[max(candles)]["close"]
+            shares[code] = (caps[code] / last_close) if last_close else 0
+
+        series = {k: [] for k in ("o", "h", "l", "c", "v")}
+        previous = {code: candles[axis[0]] for code, candles in members}
+        base = None
+        for date in axis:
+            totals = dict.fromkeys(("o", "h", "l", "c"), 0.0)
+            value = 0.0
+            for code, candles in members:
+                row = candles.get(date)
+                if row is None:
+                    row = previous[code]
+                    weight = shares[code]
+                    totals["o"] += weight * row["close"]
+                    totals["h"] += weight * row["close"]
+                    totals["l"] += weight * row["close"]
+                    totals["c"] += weight * row["close"]
+                    continue
+                previous[code] = row
+                weight = shares[code]
+                for key, field in (("o", "open"), ("h", "high"), ("l", "low"), ("c", "close")):
+                    totals[key] += weight * row[field]
+                value += row["volume"] * row["close"]
+            if base is None:
+                base = totals["c"] or 1.0
+            for key in ("o", "h", "l", "c"):
+                series[key].append(totals[key] / base * 100)
+            series["v"].append(round(value / 1e8, 1))  # 억원
+
+        # Averages come off the full axis, so a 200-day line still has values at
+        # the left edge of the published window instead of starting 200 days in.
+        ma_series = {
+            str(w): [None if v is None else round(v, 2)
+                     for v in moving_averages(series["c"], [w])[w][-publish:]]
+            for w in SECTOR_MA_WINDOWS
+        }
+        for key in ("o", "h", "l", "c"):
+            series[key] = [round(v, 2) for v in series[key][-publish:]]
+        series["v"] = series["v"][-publish:]
+
+        total_cap = sum(caps[code] for code, _ in members)
+        roster = []
+        for code, candles in members:
+            closes = [candles[d]["close"] for d in sorted(candles) if d <= axis[-1]]
+            member_mas = {w: (sum(closes[-w:]) / w if len(closes) >= w else None)
+                          for w in SECTOR_MA_WINDOWS}
+            last = closes[-1]
+            roster.append({
+                "c": code,
+                "n": names.get(code, code),
+                "w": round(caps[code] / total_cap * 100, 1) if total_cap else 0,
+                "p": round(last, 2),
+                "r": round(changes.get(code, {}).get(axis[-1], 0), 2) if changes else 0,
+                "a": [int(member_mas[w] is not None and last >= member_mas[w])
+                      for w in SECTOR_MA_WINDOWS],
+                "f": int(all(member_mas[w] is not None for w in (5, 10, 20, 60, 120))
+                         and member_mas[5] > member_mas[10] > member_mas[20]
+                         > member_mas[60] > member_mas[120]),
+            })
+        roster.sort(key=lambda m: -m["w"])
+
+        out[sector] = {
+            "n": len(members),
+            "cap": round(total_cap),
+            "members": roster,
+            "ma": ma_series,
+            **series,
+        }
+    return out
+
+
 def build(market, fetch_universe, min_universe, index_symbol, index_label, index_note=None):
     """Run the whole pipeline for one market and write its two data files."""
     tickers_path = DATA_DIR / f"{market}_tickers.json"
@@ -483,7 +634,9 @@ def build(market, fetch_universe, min_universe, index_symbol, index_label, index
     print(f"Universe: {len(universe)} stocks")
 
     sectors, caps = fetch_sector_and_cap()
-    print(f"Sector map: {len(sectors)} stocks across the market")
+    applied = apply_sector_overrides(sectors, universe)
+    print(f"Sector map: {len(sectors)} stocks across the market"
+          + (f" ({applied} reclassified)" if applied else ""))
 
     all_dates = set()
     per_stock = {}
@@ -493,20 +646,22 @@ def build(market, fetch_universe, min_universe, index_symbol, index_label, index
             history = fetch_history(code)
             if len(history) < max(MA_WINDOWS):
                 failures.append(code)
-                print(f"SKIP {code} {name}: only {len(history)} points", file=sys.stderr)
+                print(f"SKIP {code} {name}: only {len(history)} candles", file=sys.stderr)
                 continue
-            dates, rows = build_rows(history)
+            closes = close_pairs(history)
+            dates, rows = build_rows(closes)
             time.sleep(0.15)
-            changes = daily_changes(history, code)
+            changes = daily_changes(closes, code)
             for date, row in rows.items():
                 if date in changes:
                     row["r"] = round(changes[date], 2)
             all_dates.update(dates)
             per_stock[code] = {
                 "rows": rows,
-                "closes": dict(history),
-                "template": template_metrics(history),
+                "closes": dict(closes),
+                "template": template_metrics(closes),
                 "chg": changes,
+                "ohlc": history,
             }
             print(f"OK   {code} {name} ({len(rows)} aligned days)")
         except Exception as exc:  # noqa: BLE001
@@ -582,6 +737,18 @@ def build(market, fetch_universe, min_universe, index_symbol, index_label, index
     }
     changed = write_if_changed(signals_path, output, separators=(",", ":"))
 
+    sectors_output = {
+        "generated_at": datetime.now(KST).isoformat(),
+        "label": index_label,
+        "dates": sorted_dates[-SECTOR_DAYS:],
+        "sectors": sector_series(
+            per_stock, sectors, caps, sorted_dates,
+            names={code: universe[code] for code in per_stock},
+            changes={code: stock["chg"] for code, stock in per_stock.items()},
+        ),
+    }
+    write_if_changed(DATA_DIR / f"{market}_sectors.json", sectors_output, separators=(",", ":"))
+
     latest = snapshot_dates[-1]
     short_n = len(snapshots[latest])
     full_n = sum(1 for r in snapshots[latest] if r["f"])
@@ -590,6 +757,7 @@ def build(market, fetch_universe, min_universe, index_symbol, index_label, index
     print(f"\n{verb} {len(snapshot_dates)} snapshot dates in {signals_path}")
     print(f"Latest {latest}: {short_n} short-aligned, {full_n} fully aligned")
     print(f"Chart series: {len(output['series'])} stocks x {len(chart_dates)} days")
+    print(f"Sector candles: {len(sectors_output['sectors'])} sectors x {len(sectors_output['dates'])} days")
     if missing_sector:
         print(f"No sector for: {missing_sector}", file=sys.stderr)
     if failures:

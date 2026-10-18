@@ -24,7 +24,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import krx_alignment as ka  # noqa: E402
 
 MARKETS = ["kospi200", "kosdaq150"]
-DATA_FILES = ["data/prices.json", "data/kospi200_signals.json", "data/kosdaq150_signals.json"]
+DATA_FILES = ["data/prices.json",
+              "data/kospi200_signals.json", "data/kosdaq150_signals.json",
+              "data/kospi200_sectors.json", "data/kosdaq150_sectors.json"]
 LIVE = "https://jblee1031.github.io/ETF_trend/data/"
 COLLECTORS = ["fetch_prices.py", "fetch_kospi200.py", "fetch_kosdaq150.py"]
 BELLWETHER = "005930"  # Samsung Electronics, for "is there a newer trading day"
@@ -142,7 +144,7 @@ def main():
     git("fetch", "-q", "origin")
     git("pull", "-q", "--rebase", "origin", "main")
 
-    trading_day = ka.fetch_history(BELLWETHER)[-1][0]
+    trading_day = ka.fetch_history(BELLWETHER)[-1]["date"]
     current = min(published_date(m) for m in MARKETS)
     if trading_day <= current:
         print(f"RESULT: up-to-date | trading_day={trading_day} | published={current}")

@@ -259,6 +259,55 @@
   .summary-list { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.8; }
   .summary-list .hold { color: #6b7285; }
   .summary-note { font-size: 11px; color: #6b7285; margin: 8px 0 0; }
+  .pos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 6px;
+  }
+  .pos-card {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 9px;
+    cursor: pointer;
+    background: #12151c;
+  }
+  .pos-card:hover { border-color: var(--accent); }
+  .pos-card.on { border-color: var(--accent); background: #16202f; }
+  .pos-card .nm { font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 6px; }
+  .pos-card .nm span:last-child { font-weight: 400; font-family: ui-monospace, Consolas, monospace; }
+  .pos-card .meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .ma-dots { display: flex; gap: 3px; margin-top: 5px; }
+  .ma-dots i {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: #39404f;
+    font-style: normal;
+  }
+  .ma-dots i.up { background: #ff5f5f; }
+  .ma-dots i.dn { background: #4f8cff; }
+  .ma-legend { font-size: 10px; color: #6b7285; margin-top: 4px; display: flex; justify-content: space-between; }
+  .candle-wrap { position: relative; height: 440px; }
+  .method { font-size: 13px; line-height: 1.75; color: var(--text); }
+  .method p { margin: 0 0 10px; }
+  .method ol, .method ul { margin: 0 0 12px; padding-left: 20px; }
+  .method li { margin-bottom: 5px; }
+  .method code {
+    background: #12151c;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    color: #7ee2a8;
+  }
+  .method .ex { margin-top: 4px; }
+  .method .ex-table { max-width: 460px; margin-bottom: 12px; }
+  .method .caveat { color: var(--muted); font-size: 12px; }
+  .method ul.caveat li { color: var(--muted); }
+  .sector-title { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+  .sector-stats { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 8px; }
+  .sector-stats b { color: var(--text); font-weight: 600; }
   .sector-head {
     margin: 14px 0 8px;
     font-size: 13px;
@@ -290,12 +339,14 @@
   <button id="tab-btn-us" data-tab="us">미국 주식/ETF</button>
   <button id="tab-btn-kospi" data-tab="kospi">코스피200 정배열</button>
   <button id="tab-btn-kosdaq" data-tab="kosdaq">코스닥150 정배열</button>
+  <button id="tab-btn-sector" data-tab="sector">섹터 흐름</button>
 </nav>
 <main>
   <div id="app-kr" class="tab-panel active"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-us" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-kospi" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-kosdaq" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-sector" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
 </main>
 
 <script>
@@ -1248,6 +1299,388 @@ async function loadAlignment(containerId, url, label) {
   }
 }
 
+// ---- 섹터 흐름 탭 ----
+
+const SECTOR_MA = [5, 10, 20, 60, 120, 200];
+const SECTOR_MA_COLOR = {
+  5: "#ffb03a", 10: "#ff7dc0", 20: "#4f8cff", 60: "#39d98a", 120: "#c07dff", 200: "#9aa1b1",
+};
+const SECTOR_MA_WIDTH = { 5: 1.1, 10: 1.1, 20: 2.4, 60: 2.4, 120: 1.3, 200: 1.6 };
+const ALIGN_MA = [5, 10, 20, 60, 120];   // 정배열 판정은 200일선을 뺀다
+const SECTOR_PERIODS = [
+  { key: "3m", label: "3개월", days: 65 },
+  { key: "6m", label: "6개월", days: null },
+];
+const UP = "#ff5f5f";
+const DOWN = "#4f8cff";
+
+function movingAverage(values, window) {
+  const out = [];
+  let sum = 0;
+  values.forEach((v, i) => {
+    sum += v;
+    if (i >= window) sum -= values[i - window];
+    out.push(i >= window - 1 ? sum / window : null);
+  });
+  return out;
+}
+
+function maSeries(sector, window) {
+  // Published by the collector over the full history; older files lack it.
+  const stored = sector.ma && sector.ma[String(window)];
+  return stored || movingAverage(sector.c, window);
+}
+
+function sectorStats(sector) {
+  const close = sector.c;
+  const last = close[close.length - 1];
+  const mas = {};
+  SECTOR_MA.forEach((w) => {
+    const series = maSeries(sector, w);
+    mas[w] = series[series.length - 1];
+  });
+  const back = (n) => (close.length > n ? (last / close[close.length - 1 - n] - 1) * 100 : null);
+  const aligned = ALIGN_MA.every((w) => mas[w] !== null && mas[w] !== undefined)
+    && mas[5] > mas[10] && mas[10] > mas[20] && mas[20] > mas[60] && mas[60] > mas[120];
+  return {
+    last,
+    mas,
+    above: SECTOR_MA.filter((w) => mas[w] !== null && last >= mas[w]),
+    d1: back(1),
+    d5: back(5),
+    d20: back(20),
+    aligned,
+  };
+}
+
+function sectorCard(name, sector, stats, selected) {
+  const dots = SECTOR_MA.map((w) => {
+    const ma = stats.mas[w];
+    const cls = ma === null ? "" : stats.last >= ma ? "up" : "dn";
+    return `<i class="${cls}" title="${w}일선"></i>`;
+  }).join("");
+  const chgCls = stats.d1 > 0 ? "up" : stats.d1 < 0 ? "down" : "";
+  return `
+    <div class="pos-card${selected ? " on" : ""}" data-sector="${name}">
+      <div class="nm"><span>${name}${stats.aligned ? ' <span class="badge">정배열</span>' : ""}</span>
+        <span class="${chgCls}">${signedPct(stats.d1)}</span></div>
+      <div class="meta">${sector.n}종목 · ${fmtCap(sector.cap)} · 5일 ${signedPct(stats.d5, 1)} · 20일 ${signedPct(stats.d20, 1)}</div>
+      <div class="ma-dots">${dots}</div>
+      <div class="ma-legend">${SECTOR_MA.map((w) => `<span>${w}</span>`).join("")}</div>
+    </div>`;
+}
+
+function candleChart(canvas, dates, sector, period) {
+  const periodDef = SECTOR_PERIODS.find((p) => p.key === period);
+  const total = dates.length;
+  const start = periodDef.days ? Math.max(0, total - periodDef.days) : 0;
+  const labels = dates.slice(start);
+  const slice = (arr) => arr.slice(start);
+
+  const open = slice(sector.o), high = slice(sector.h), low = slice(sector.l), close = slice(sector.c);
+  const volume = slice(sector.v);
+  const colors = close.map((c, i) => (c >= open[i] ? UP : DOWN));
+
+  const datasets = [
+    {
+      // Volume shares the panel like an HTS chart: its own axis is stretched so
+      // the bars only reach the bottom quarter and never cover the candles.
+      type: "bar",
+      label: "거래대금",
+      data: volume,
+      backgroundColor: colors.map((c) => c + "66"),
+      yAxisID: "vol",
+      barPercentage: 0.8,
+      categoryPercentage: 0.95,
+      grouped: false,
+      order: 4,
+    },
+    {
+      // grouped:false keeps both bars on the category centre, so the wick runs
+      // down the middle of the body instead of being nudged alongside it.
+      type: "bar",
+      label: "고저",
+      data: high.map((h, i) => [low[i], h]),
+      backgroundColor: colors,
+      barPercentage: 0.14,
+      categoryPercentage: 0.95,
+      grouped: false,
+      order: 3,
+    },
+    {
+      type: "bar",
+      label: "시가-종가",
+      data: close.map((c, i) => [Math.min(open[i], c), Math.max(open[i], c)]),
+      backgroundColor: colors,
+      barPercentage: 0.92,
+      categoryPercentage: 0.95,
+      grouped: false,
+      order: 2,
+    },
+  ];
+  // MAs run over the full history so the first visible candle already has one.
+  SECTOR_MA.forEach((w) => {
+    datasets.push({
+      type: "line",
+      label: `${w}일선`,
+      data: slice(maSeries(sector, w)),
+      borderColor: SECTOR_MA_COLOR[w],
+      borderWidth: SECTOR_MA_WIDTH[w] || 1.2,
+      pointRadius: 0,
+      spanGaps: true,
+      tension: 0.15,
+      order: 1,
+    });
+  });
+
+  // Bars default to a zero-based axis, which squashes an index hovering near 100.
+  const visible = [...low, ...high].concat(
+    datasets.filter((s) => s.type === "line").flatMap((s) => s.data).filter((v) => v !== null)
+  );
+  const lo = Math.min(...visible), hi = Math.max(...visible);
+  const pad = Math.max((hi - lo) * 0.08, 0.5);
+
+  return new Chart(canvas, {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: {
+            color: "#9aa1b1", boxWidth: 12, font: { size: 11 },
+            filter: (item) => item.text.endsWith("일선"),
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const i = ctx.dataIndex;
+              if (ctx.dataset.type === "line") return `${ctx.dataset.label}: ${fmtNum(ctx.parsed.y)}`;
+              if (ctx.dataset.label === "거래대금") return `거래대금 ${fmtNum(volume[i])}억원`;
+              if (ctx.dataset.label !== "시가-종가") return null;
+              const chg = i > 0 ? (close[i] / close[i - 1] - 1) * 100 : null;
+              return [`시 ${fmtNum(open[i])}  고 ${fmtNum(high[i])}`,
+                      `저 ${fmtNum(low[i])}  종 ${fmtNum(close[i])}`,
+                      `전일대비 ${signedPct(chg)}`];
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: "#9aa1b1", maxRotation: 0, autoSkip: true, maxTicksLimit: 9 }, grid: { color: "#1e222c" }, stacked: false },
+        y: {
+          min: Math.floor(lo - pad), max: Math.ceil(hi + pad),
+          beginAtZero: false,
+          ticks: { color: "#9aa1b1" }, grid: { color: "#1e222c" }, stacked: false,
+          weight: 1,
+        },
+        vol: {
+          position: "right",
+          min: 0,
+          max: Math.max(...volume) * 4 || 1,
+          grid: { display: false },
+          ticks: {
+            color: "#6b7285", maxTicksLimit: 3, font: { size: 10 },
+            callback: (v) => (v >= 10000 ? `${Math.round(v / 10000)}조` : `${fmtNum(v)}억`),
+          },
+        },
+      },
+    },
+  });
+}
+
+function memberTable(sector) {
+  const members = sector.members || [];
+  if (!members.length) return "";
+  let html = "<table><thead><tr><th>종목</th><th>비중</th><th>종가</th><th>등락률</th>" +
+    SECTOR_MA.map((w) => `<th>${w}일선</th>`).join("") + "<th>정배열</th></tr></thead><tbody>";
+  members.forEach((m) => {
+    const chgCls = m.r > 0 ? "up" : m.r < 0 ? "down" : "";
+    html += `<tr><td><a href="${fnguideUrl(m.c)}" target="_blank" rel="noopener">${m.n}</a></td>`;
+    html += `<td>${m.w.toFixed(1)}%</td><td>${fmtNum(m.p)}</td>`;
+    html += `<td class="${chgCls}">${signedPct(m.r)}</td>`;
+    m.a.forEach((above) => {
+      html += `<td class="${above ? "up" : "down"}">${above ? "위" : "아래"}</td>`;
+    });
+    html += `<td>${m.f ? '<span class="badge">정배열</span>' : "-"}</td></tr>`;
+  });
+  return html + "</tbody></table>";
+}
+
+function renderSectorTab(app, markets) {
+  const keys = Object.keys(markets);
+  app.innerHTML = `
+    <div class="toolbar">
+      <label>시장</label>
+      <span class="controls market-controls"></span>
+      <span class="sep"></span>
+      <label>정렬</label>
+      <span class="controls sort-controls"></span>
+      <span class="sep"></span>
+      <label>기간</label>
+      <span class="controls period-controls"></span>
+      <span class="note">카드를 클릭하면 해당 섹터의 일봉·거래량·이평선을 봅니다</span>
+    </div>
+    <section class="group">
+      <div class="group-head">
+        <h2>섹터별 이평선 위치 <span class="rule">막대 4개 = 5·20·60·120일선, 빨강이면 지수가 그 선 위</span></h2>
+        <span class="count sector-count"></span>
+      </div>
+      <div class="pos-grid"></div>
+    </section>
+    <section class="group detail">
+      <div class="group-head"><h2 class="sector-title"></h2></div>
+      <div class="sector-stats"></div>
+      <div class="candle-wrap"><canvas class="candle-canvas"></canvas></div>
+      <div class="table-wrap member-table"></div>
+    </section>
+    <section class="group">
+      <div class="group-head"><h2>섹터 지수는 이렇게 계산합니다 <span class="rule">가격 수준이 아니라 시가총액 비중으로 합산</span></h2></div>
+      <div class="method">
+        <p><b>종목마다 가격이 다른 건 상관이 없습니다.</b> 주가를 그대로 더하지 않고, 각 종목의 <b>시가총액</b>을 더하기 때문입니다. 10만원짜리 주식과 1만원짜리 주식을 비교하는 게 아니라, 회사 전체 가치가 얼마나 늘고 줄었는지를 합칩니다.</p>
+        <ol>
+          <li><b>주식 수를 구합니다</b> — 종목별 <code>주식 수 = 시가총액 ÷ 현재 종가</code>. 이 주식 수는 기간 내내 고정합니다.</li>
+          <li><b>매일 시가총액 합계를 냅니다</b> — <code>Σ(주식 수 × 그날 종가)</code>. 주가가 비싼 종목이 아니라 <b>덩치가 큰 종목</b>이 더 큰 영향을 줍니다.</li>
+          <li><b>첫날을 100으로 환산합니다</b> — <code>지수 = 그날 합계 ÷ 기간 첫날 합계 × 100</code>. 그래서 지수 118이면 기간 첫날보다 18% 올랐다는 뜻입니다.</li>
+          <li><b>봉의 시·고·저·종가</b>도 같은 방식으로 각각 합산합니다. <b>거래대금</b>은 <code>Σ(거래량 × 종가)</code>로 소속 종목을 모두 더한 값입니다.</li>
+        </ol>
+        <p class="ex"><b>예시</b> — A사(종가 10만원, 시총 10조)와 B사(종가 1만원, 시총 5조)로 이뤄진 섹터에서 A가 10% 오르고 B가 그대로라면:</p>
+        <table class="mini ex-table">
+          <tr><th>　</th><th>주식 수</th><th>첫날</th><th>다음 날</th></tr>
+          <tr><td>A사</td><td>1억 주</td><td>10조</td><td>11조</td></tr>
+          <tr><td>B사</td><td>5억 주</td><td>5조</td><td>5조</td></tr>
+          <tr><td><b>합계</b></td><td>-</td><td><b>15조 → 지수 100</b></td><td><b>16조 → 지수 106.7</b></td></tr>
+        </table>
+        <p>A가 10% 올랐지만 섹터는 6.7%만 오릅니다. A의 비중이 3분의 2이기 때문입니다. 종목별 비중은 위 구성종목 표의 <b>비중</b> 열에서 확인할 수 있습니다.</p>
+        <p class="caveat"><b>알아두실 점</b></p>
+        <ul class="caveat">
+          <li>주식 수를 <b>최신 시가총액 기준으로 고정</b>하므로, 기간 중 유상증자·감자 같은 주식 수 변동은 반영되지 않습니다.</li>
+          <li>거래정지 등으로 거래가 없던 날은 <b>직전 종가로 메웁니다</b>. 기간 첫날에 거래가 없던 종목은 그 섹터 계산에서 빠집니다(중간에 들어오면 가격과 무관하게 지수가 튀기 때문입니다).</li>
+          <li><b>소속 종목이 2개 이상</b>인 섹터만 표시합니다.</li>
+          <li>이평선은 <b>거래일 기준</b>이며 휴장일은 세지 않습니다. 120·200일선은 화면에 보이는 구간보다 긴 이력으로 계산해 왼쪽 끝부터 그립니다.</li>
+          <li>업종 분류는 네이버 기준이지만, 그룹 전체를 지배하는 <b>순수 지주사는 '지주사' 섹터로 따로 묶었습니다</b>(SK·GS·SK스퀘어·삼성물산·LG·두산·한화·CJ·롯데지주). 지주사가 자회사 업종에 섞이면 섹터가 본업 흐름 대신 지주사를 따라가기 때문입니다. 분류는 <code>data/sector_overrides.json</code>에서 바꿀 수 있습니다.</li>
+        </ul>
+      </div>
+    </section>`;
+
+  const q = (sel) => app.querySelector(sel);
+  const state = { market: keys[0], sort: "cap", period: "3m", sector: null };
+  let candles = null;
+
+  const makeButtons = (container, items, onPick) => {
+    const btns = {};
+    items.forEach(([key, text]) => {
+      const b = document.createElement("button");
+      b.textContent = text;
+      container.appendChild(b);
+      btns[key] = b;
+      b.addEventListener("click", () => onPick(key));
+    });
+    return btns;
+  };
+
+  const MARKET_LABEL = { kospi200: "코스피200", kosdaq150: "코스닥150" };
+  const marketBtns = makeButtons(q(".market-controls"), keys.map((k) => [k, MARKET_LABEL[k] || k]), (k) => {
+    state.market = k;
+    state.sector = null;
+    draw();
+  });
+  const sortBtns = makeButtons(q(".sort-controls"),
+    [["cap", "시가총액순"], ["d1", "당일 등락순"], ["d20", "20일 등락순"], ["name", "이름순"]],
+    (k) => { state.sort = k; draw(); });
+  const periodBtns = makeButtons(q(".period-controls"), SECTOR_PERIODS.map((p) => [p.key, p.label]), (k) => {
+    state.period = k;
+    drawDetail();
+  });
+
+  function entries() {
+    const data = markets[state.market];
+    const list = Object.entries(data.sectors).map(([name, sector]) => ({
+      name, sector, stats: sectorStats(sector),
+    }));
+    const by = {
+      cap: (a, b) => b.sector.cap - a.sector.cap,
+      d1: (a, b) => b.stats.d1 - a.stats.d1,
+      d20: (a, b) => b.stats.d20 - a.stats.d20,
+      name: (a, b) => a.name.localeCompare(b.name),
+    };
+    return list.sort(by[state.sort]);
+  }
+
+  function drawDetail() {
+    const data = markets[state.market];
+    const name = state.sector;
+    const sector = data.sectors[name];
+    if (!sector) return;
+    const stats = sectorStats(sector);
+
+    q(".sector-title").textContent = `${name} · ${sector.n}종목`;
+    const maText = SECTOR_MA.map((w) => {
+      const ma = stats.mas[w];
+      if (ma === null) return `${w}일선 -`;
+      const over = stats.last >= ma;
+      return `<b class="${over ? "up" : "down"}">${w}일선 ${over ? "위" : "아래"}</b> (${fmtNum(ma)})`;
+    }).join(" · ");
+    q(".sector-stats").innerHTML =
+      `<span>지수 <b>${fmtNum(stats.last)}</b> (기간 첫날 100)</span>` +
+      `<span>당일 <b class="${stats.d1 > 0 ? "up" : stats.d1 < 0 ? "down" : ""}">${signedPct(stats.d1)}</b></span>` +
+      `<span>5일 ${signedPct(stats.d5)}</span><span>20일 ${signedPct(stats.d20)}</span>` +
+      `<span>시가총액 ${fmtCap(sector.cap)}</span><span>${maText}</span>` +
+      (stats.aligned ? `<span class="badge">이평선 정배열</span>` : "");
+
+    q(".member-table").innerHTML = memberTable(sector);
+
+    Object.entries(periodBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.period));
+    if (candles) candles.destroy();
+    candles = candleChart(q(".candle-canvas"), data.dates, sector, state.period);
+  }
+
+  function draw() {
+    const list = entries();
+    if (!state.sector || !markets[state.market].sectors[state.sector]) {
+      state.sector = list[0] && list[0].name;
+    }
+    Object.entries(marketBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.market));
+    Object.entries(sortBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.sort));
+
+    const aligned = list.filter((e) => e.stats.aligned).length;
+    q(".sector-count").textContent = `${list.length}개 섹터 · 정배열 ${aligned}개`;
+    q(".pos-grid").innerHTML = list
+      .map((e) => sectorCard(e.name, e.sector, e.stats, e.name === state.sector))
+      .join("");
+    q(".pos-grid").querySelectorAll(".pos-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        state.sector = card.dataset.sector;
+        q(".pos-grid").querySelectorAll(".pos-card").forEach((c) => c.classList.toggle("on", c === card));
+        drawDetail();
+      });
+    });
+    drawDetail();
+  }
+
+  draw();
+}
+
+async function loadSectorTab() {
+  const app = document.getElementById("app-sector");
+  try {
+    const [kospi, kosdaq] = await Promise.all([
+      fetch("data/kospi200_sectors.json", { cache: "no-store" }).then((r) => r.json()),
+      fetch("data/kosdaq150_sectors.json", { cache: "no-store" }).then((r) => r.json()),
+    ]);
+    renderSectorTab(app, { kospi200: kospi, kosdaq150: kosdaq });
+    return kospi.generated_at;
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = `<div class="error">데이터를 불러오지 못했습니다: ${err.message}</div>`;
+    return null;
+  }
+}
+
 function setupTabs() {
   const buttons = document.querySelectorAll(".tabs button");
   buttons.forEach((btn) => {
@@ -1267,6 +1700,7 @@ async function main() {
     loadMarket("app-us", "data/us_groups.json", "data/us_prices.json", "$"),
     loadAlignment("app-kospi", "data/kospi200_signals.json", "코스피200"),
     loadAlignment("app-kosdaq", "data/kosdaq150_signals.json", "코스닥150"),
+    loadSectorTab(),
   ]);
   const parts = [];
   if (krUpdatedAt) parts.push("국내 " + new Date(krUpdatedAt).toLocaleString("ko-KR"));
