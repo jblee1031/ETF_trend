@@ -326,6 +326,7 @@
     color: #7ee2a8;
   }
   .badge.new { background: #4a3a2d; color: #ffc07a; }
+  .badge.near { background: #3a3350; color: #c0a7ff; }
   .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
 </style>
 </head>
@@ -1340,8 +1341,19 @@ function sectorStats(sector) {
     mas[w] = series[series.length - 1];
   });
   const back = (n) => (close.length > n ? (last / close[close.length - 1 - n] - 1) * 100 : null);
-  const aligned = ALIGN_MA.every((w) => mas[w] !== null && mas[w] !== undefined)
-    && mas[5] > mas[10] && mas[10] > mas[20] && mas[20] > mas[60] && mas[60] > mas[120];
+
+  // 정배열은 이평선끼리의 순서를 본다. 가격이 모든 선 위에 있어도 순서가
+  // 어긋나면 정배열이 아니라서, 몇 군데가 깨졌는지 함께 들고 다닌다.
+  const known = ALIGN_MA.every((w) => mas[w] !== null && mas[w] !== undefined);
+  const breaks = [];
+  if (known) {
+    for (let i = 0; i < ALIGN_MA.length - 1; i++) {
+      const [a, b] = [ALIGN_MA[i], ALIGN_MA[i + 1]];
+      if (!(mas[a] > mas[b])) breaks.push(`${a}일선 < ${b}일선`);
+    }
+  }
+  const aligned = known && breaks.length === 0;
+  const near = known && breaks.length === 1;
   return {
     last,
     mas,
@@ -1350,7 +1362,15 @@ function sectorStats(sector) {
     d5: back(5),
     d20: back(20),
     aligned,
+    near,
+    breaks,
   };
+}
+
+function alignBadge(stats) {
+  if (stats.aligned) return ' <span class="badge">정배열</span>';
+  if (stats.near) return ` <span class="badge near" title="${stats.breaks[0]}">정배열 근접</span>`;
+  return "";
 }
 
 function sectorCard(name, sector, stats, selected) {
@@ -1362,7 +1382,7 @@ function sectorCard(name, sector, stats, selected) {
   const chgCls = stats.d1 > 0 ? "up" : stats.d1 < 0 ? "down" : "";
   return `
     <div class="pos-card${selected ? " on" : ""}" data-sector="${name}">
-      <div class="nm"><span>${name}${stats.aligned ? ' <span class="badge">정배열</span>' : ""}</span>
+      <div class="nm"><span>${name}${alignBadge(stats)}</span>
         <span class="${chgCls}">${signedPct(stats.d1)}</span></div>
       <div class="meta">${sector.n}종목 · ${fmtCap(sector.cap)} · 5일 ${signedPct(stats.d5, 1)} · 20일 ${signedPct(stats.d20, 1)}</div>
       <div class="ma-dots">${dots}</div>
@@ -1630,7 +1650,11 @@ function renderSectorTab(app, markets) {
       `<span>당일 <b class="${stats.d1 > 0 ? "up" : stats.d1 < 0 ? "down" : ""}">${signedPct(stats.d1)}</b></span>` +
       `<span>5일 ${signedPct(stats.d5)}</span><span>20일 ${signedPct(stats.d20)}</span>` +
       `<span>시가총액 ${fmtCap(sector.cap)}</span><span>${maText}</span>` +
-      (stats.aligned ? `<span class="badge">이평선 정배열</span>` : "");
+      (stats.aligned
+        ? `<span class="badge">이평선 정배열</span>`
+        : stats.breaks.length
+          ? `<span class="${stats.near ? "badge near" : "hold"}">${stats.near ? "정배열 근접" : "정배열 아님"} — ${stats.breaks.join(", ")}</span>`
+          : "");
 
     q(".member-table").innerHTML = memberTable(sector);
 
@@ -1648,7 +1672,9 @@ function renderSectorTab(app, markets) {
     Object.entries(sortBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.sort));
 
     const aligned = list.filter((e) => e.stats.aligned).length;
-    q(".sector-count").textContent = `${list.length}개 섹터 · 정배열 ${aligned}개`;
+    const near = list.filter((e) => e.stats.near).length;
+    q(".sector-count").textContent =
+      `${list.length}개 섹터 · 정배열 ${aligned}개 · 정배열 근접 ${near}개`;
     q(".pos-grid").innerHTML = list
       .map((e) => sectorCard(e.name, e.sector, e.stats, e.name === state.sector))
       .join("");
