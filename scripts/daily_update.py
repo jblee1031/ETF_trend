@@ -117,7 +117,7 @@ def commit_and_push(trading_day):
         "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>")
     for attempt in range(3):
         git("fetch", "-q", "origin")
-        if git("pull", "-q", "--rebase", "origin", "main", check=False).returncode == 0 \
+        if git("pull", "-q", "--rebase", "--autostash", "origin", "main", check=False).returncode == 0 \
                 and git("push", "origin", "main", check=False).returncode == 0:
             return git("rev-parse", "--short", "HEAD").stdout.strip()
         time.sleep(10 * (attempt + 1))
@@ -142,7 +142,7 @@ def live_is_current(trading_day):
 def main():
     skip_live = "--skip-live" in sys.argv
     git("fetch", "-q", "origin")
-    git("pull", "-q", "--rebase", "origin", "main")
+    git("pull", "-q", "--rebase", "--autostash", "origin", "main")
 
     trading_day = ka.fetch_history(BELLWETHER)[-1]["date"]
     current = min(published_date(m) for m in MARKETS)

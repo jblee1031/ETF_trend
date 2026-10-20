@@ -1332,15 +1332,15 @@ function maSeries(sector, window) {
   return stored || movingAverage(sector.c, window);
 }
 
-function sectorStats(sector) {
+function sectorStats(sector, at) {
   const close = sector.c;
-  const last = close[close.length - 1];
+  const i = at === undefined ? close.length - 1 : at;
+  const last = close[i];
   const mas = {};
   SECTOR_MA.forEach((w) => {
-    const series = maSeries(sector, w);
-    mas[w] = series[series.length - 1];
+    mas[w] = maSeries(sector, w)[i];
   });
-  const back = (n) => (close.length > n ? (last / close[close.length - 1 - n] - 1) * 100 : null);
+  const back = (n) => (i - n >= 0 ? (last / close[i - n] - 1) * 100 : null);
 
   // 정배열은 이평선끼리의 순서를 본다. 가격이 모든 선 위에 있어도 순서가
   // 어긋나면 정배열이 아니라서, 몇 군데가 깨졌는지 함께 들고 다닌다.
@@ -1390,12 +1390,12 @@ function sectorCard(name, sector, stats, selected) {
     </div>`;
 }
 
-function candleChart(canvas, dates, sector, period) {
+function candleChart(canvas, dates, sector, period, at) {
   const periodDef = SECTOR_PERIODS.find((p) => p.key === period);
-  const total = dates.length;
-  const start = periodDef.days ? Math.max(0, total - periodDef.days) : 0;
-  const labels = dates.slice(start);
-  const slice = (arr) => arr.slice(start);
+  const end = (at === undefined ? dates.length - 1 : at) + 1;
+  const start = periodDef.days ? Math.max(0, end - periodDef.days) : 0;
+  const labels = dates.slice(start, end);
+  const slice = (arr) => arr.slice(start, end);
 
   const open = slice(sector.o), high = slice(sector.h), low = slice(sector.l), close = slice(sector.c);
   const volume = slice(sector.v);
@@ -1513,20 +1513,29 @@ function candleChart(canvas, dates, sector, period) {
   });
 }
 
-function memberTable(sector) {
+function memberTable(sector, at) {
   const members = sector.members || [];
   if (!members.length) return "";
+  const i = at === undefined ? (sector.c.length - 1) : at;
   let html = "<table><thead><tr><th>종목</th><th>비중</th><th>종가</th><th>등락률</th>" +
     SECTOR_MA.map((w) => `<th>${w}일선</th>`).join("") + "<th>정배열</th></tr></thead><tbody>";
   members.forEach((m) => {
-    const chgCls = m.r > 0 ? "up" : m.r < 0 ? "down" : "";
+    // m.p/m.m are per-date arrays; m.m packs the MA flags into one int.
+    const price = Array.isArray(m.p) ? m.p[i] : m.p;
+    const prev = Array.isArray(m.p) && i > 0 ? m.p[i - 1] : null;
+    const chg = prev ? (price / prev - 1) * 100 : null;
+    const bits = Array.isArray(m.m) ? m.m[i] : null;
+    const above = (j) => (bits === null ? (m.a ? m.a[j] : 0) : (bits >> j) & 1);
+    const aligned = bits === null ? m.f : (bits >> SECTOR_MA.length) & 1;
+
+    const chgCls = chg > 0 ? "up" : chg < 0 ? "down" : "";
     html += `<tr><td><a href="${fnguideUrl(m.c)}" target="_blank" rel="noopener">${m.n}</a></td>`;
-    html += `<td>${m.w.toFixed(1)}%</td><td>${fmtNum(m.p)}</td>`;
-    html += `<td class="${chgCls}">${signedPct(m.r)}</td>`;
-    m.a.forEach((above) => {
-      html += `<td class="${above ? "up" : "down"}">${above ? "위" : "아래"}</td>`;
+    html += `<td>${m.w.toFixed(1)}%</td><td>${fmtNum(price)}</td>`;
+    html += `<td class="${chgCls}">${chg === null ? "-" : signedPct(chg)}</td>`;
+    SECTOR_MA.forEach((_, j) => {
+      html += `<td class="${above(j) ? "up" : "down"}">${above(j) ? "위" : "아래"}</td>`;
     });
-    html += `<td>${m.f ? '<span class="badge">정배열</span>' : "-"}</td></tr>`;
+    html += `<td>${aligned ? '<span class="badge">정배열</span>' : "-"}</td></tr>`;
   });
   return html + "</tbody></table>";
 }
@@ -1535,6 +1544,9 @@ function renderSectorTab(app, markets) {
   const keys = Object.keys(markets);
   app.innerHTML = `
     <div class="toolbar">
+      <label>기준일</label>
+      <select class="date-pick">${[...markets[keys[0]].dates].reverse().map((d) => `<option value="${d}">${d}</option>`).join("")}</select>
+      <span class="sep"></span>
       <label>시장</label>
       <span class="controls market-controls"></span>
       <span class="sep"></span>
@@ -1547,7 +1559,7 @@ function renderSectorTab(app, markets) {
     </div>
     <section class="group">
       <div class="group-head">
-        <h2>섹터별 이평선 위치 <span class="rule">막대 4개 = 5·20·60·120일선, 빨강이면 지수가 그 선 위</span></h2>
+        <h2>섹터별 이평선 위치 <span class="rule">막대 = ${SECTOR_MA.join("·")}일선, 빨강이면 지수가 그 선 위 · 배지는 이평선끼리의 순서</span></h2>
         <span class="count sector-count"></span>
       </div>
       <div class="pos-grid"></div>
@@ -1588,8 +1600,15 @@ function renderSectorTab(app, markets) {
     </section>`;
 
   const q = (sel) => app.querySelector(sel);
-  const state = { market: keys[0], sort: "cap", period: "3m", sector: null };
+  const state = { market: keys[0], sort: "cap", period: "3m", sector: null, date: null };
   let candles = null;
+
+  // Markets can end on different dates; index per market by date string.
+  function atIndex() {
+    const dates = markets[state.market].dates;
+    const i = state.date ? dates.indexOf(state.date) : -1;
+    return i === -1 ? dates.length - 1 : i;
+  }
 
   const makeButtons = (container, items, onPick) => {
     const btns = {};
@@ -1617,10 +1636,16 @@ function renderSectorTab(app, markets) {
     drawDetail();
   });
 
+  q(".date-pick").addEventListener("change", (e) => {
+    state.date = e.target.value;
+    draw();
+  });
+
   function entries() {
     const data = markets[state.market];
+    const at = atIndex();
     const list = Object.entries(data.sectors).map(([name, sector]) => ({
-      name, sector, stats: sectorStats(sector),
+      name, sector, stats: sectorStats(sector, at),
     }));
     const by = {
       cap: (a, b) => b.sector.cap - a.sector.cap,
@@ -1636,7 +1661,8 @@ function renderSectorTab(app, markets) {
     const name = state.sector;
     const sector = data.sectors[name];
     if (!sector) return;
-    const stats = sectorStats(sector);
+    const at = atIndex();
+    const stats = sectorStats(sector, at);
 
     q(".sector-title").textContent = `${name} · ${sector.n}종목`;
     const maText = SECTOR_MA.map((w) => {
@@ -1646,7 +1672,7 @@ function renderSectorTab(app, markets) {
       return `<b class="${over ? "up" : "down"}">${w}일선 ${over ? "위" : "아래"}</b> (${fmtNum(ma)})`;
     }).join(" · ");
     q(".sector-stats").innerHTML =
-      `<span>지수 <b>${fmtNum(stats.last)}</b> (기간 첫날 100)</span>` +
+      `<span>${data.dates[at]} 지수 <b>${fmtNum(stats.last)}</b> (기간 첫날 100)</span>` +
       `<span>당일 <b class="${stats.d1 > 0 ? "up" : stats.d1 < 0 ? "down" : ""}">${signedPct(stats.d1)}</b></span>` +
       `<span>5일 ${signedPct(stats.d5)}</span><span>20일 ${signedPct(stats.d20)}</span>` +
       `<span>시가총액 ${fmtCap(sector.cap)}</span><span>${maText}</span>` +
@@ -1656,11 +1682,11 @@ function renderSectorTab(app, markets) {
           ? `<span class="${stats.near ? "badge near" : "hold"}">${stats.near ? "정배열 근접" : "정배열 아님"} — ${stats.breaks.join(", ")}</span>`
           : "");
 
-    q(".member-table").innerHTML = memberTable(sector);
+    q(".member-table").innerHTML = memberTable(sector, at);
 
     Object.entries(periodBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.period));
     if (candles) candles.destroy();
-    candles = candleChart(q(".candle-canvas"), data.dates, sector, state.period);
+    candles = candleChart(q(".candle-canvas"), data.dates, sector, state.period, at);
   }
 
   function draw() {

@@ -518,7 +518,7 @@ SECTOR_MIN_MEMBERS = 2  # a one-stock "sector" is just that stock
 SECTOR_MA_WINDOWS = [5, 10, 20, 60, 120, 200]
 
 
-def sector_series(per_stock, sectors, caps, axis, names=None, changes=None, publish=SECTOR_DAYS):
+def sector_series(per_stock, sectors, caps, axis, names=None, publish=SECTOR_DAYS):
     """Cap-weighted OHLC + traded value per sector, as an index based at 100.
 
     Share counts come from the latest market cap and close, then stay fixed, so
@@ -527,11 +527,16 @@ def sector_series(per_stock, sectors, caps, axis, names=None, changes=None, publ
     adding one midway would step the index for a reason that isn't price.
     Missing days inside the window carry the previous close forward.
     """
+    # Membership is judged at the start of the *published* window, not of the
+    # whole fetched history: feeds hand back slightly different start dates per
+    # stock, so testing the full axis dropped long-listed names at random.
+    window_start = axis[-publish] if len(axis) > publish else axis[0]
+
     grouped = {}
     for code, stock in per_stock.items():
         sector = sectors.get(code)
         candles = {row["date"]: row for row in stock["ohlc"]}
-        if not sector or axis[0] not in candles or not caps.get(code):
+        if not sector or window_start not in candles or not caps.get(code):
             continue
         grouped.setdefault(sector, []).append((code, candles))
 
@@ -545,7 +550,9 @@ def sector_series(per_stock, sectors, caps, axis, names=None, changes=None, publ
             shares[code] = (caps[code] / last_close) if last_close else 0
 
         series = {k: [] for k in ("o", "h", "l", "c", "v")}
-        previous = {code: candles[axis[0]] for code, candles in members}
+        # Before a member's first candle its earliest close stands in, so the
+        # warm-up stretch the long averages need is never empty.
+        previous = {code: candles[min(candles)] for code, candles in members}
         base = None
         for date in axis:
             totals = dict.fromkeys(("o", "h", "l", "c"), 0.0)
@@ -585,21 +592,36 @@ def sector_series(per_stock, sectors, caps, axis, names=None, changes=None, publ
         total_cap = sum(caps[code] for code, _ in members)
         roster = []
         for code, candles in members:
-            closes = [candles[d]["close"] for d in sorted(candles) if d <= axis[-1]]
-            member_mas = {w: (sum(closes[-w:]) / w if len(closes) >= w else None)
-                          for w in SECTOR_MA_WINDOWS}
-            last = closes[-1]
+            # Closes carried forward across halts, so every published date has a
+            # price and the averages below line up with the sector's own axis.
+            filled = []
+            carried = candles[min(candles)]["close"]
+            for date in axis:
+                row = candles.get(date)
+                carried = row["close"] if row else carried
+                filled.append(carried)
+            member_mas = moving_averages(filled, SECTOR_MA_WINDOWS)
+
+            # One int per date: bit i = close is at or above SECTOR_MA_WINDOWS[i],
+            # top bit = the averages themselves are in order.
+            flags = []
+            for i in range(len(axis)):
+                bits = 0
+                for j, w in enumerate(SECTOR_MA_WINDOWS):
+                    ma = member_mas[w][i]
+                    if ma is not None and filled[i] >= ma:
+                        bits |= 1 << j
+                ordered = [member_mas[w][i] for w in (5, 10, 20, 60, 120)]
+                if None not in ordered and all(a > b for a, b in zip(ordered, ordered[1:])):
+                    bits |= 1 << len(SECTOR_MA_WINDOWS)
+                flags.append(bits)
+
             roster.append({
                 "c": code,
                 "n": names.get(code, code),
                 "w": round(caps[code] / total_cap * 100, 1) if total_cap else 0,
-                "p": round(last, 2),
-                "r": round(changes.get(code, {}).get(axis[-1], 0), 2) if changes else 0,
-                "a": [int(member_mas[w] is not None and last >= member_mas[w])
-                      for w in SECTOR_MA_WINDOWS],
-                "f": int(all(member_mas[w] is not None for w in (5, 10, 20, 60, 120))
-                         and member_mas[5] > member_mas[10] > member_mas[20]
-                         > member_mas[60] > member_mas[120]),
+                "p": [round(v, 2) for v in filled[-publish:]],
+                "m": flags[-publish:],
             })
         roster.sort(key=lambda m: -m["w"])
 
@@ -744,7 +766,6 @@ def build(market, fetch_universe, min_universe, index_symbol, index_label, index
         "sectors": sector_series(
             per_stock, sectors, caps, sorted_dates,
             names={code: universe[code] for code in per_stock},
-            changes={code: stock["chg"] for code, stock in per_stock.items()},
         ),
     }
     write_if_changed(DATA_DIR / f"{market}_sectors.json", sectors_output, separators=(",", ":"))
