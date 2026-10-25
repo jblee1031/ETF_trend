@@ -34,7 +34,8 @@ TOP = 15                 # 하루에 세우는 상위 종목 수
 SECTOR_TOP = 5           # 파레토 막대를 눌렀을 때 보여줄 섹터 내 상위 종목
 MAX_DAYS = 120           # 하루 40KB 안팎으로 늘어나므로 6개월쯤에서 끊는다
 MARKETS = ("KOSPI", "KOSDAQ")   # 코넥스는 거래대금이 미미해 뺀다
-FUND_KINDS = {"etf", "etn"}     # '주식만' 필터에서 빠지는 종류
+FUND_KINDS = {"etf", "etn"}     # 거래대금 상위에서 빼는 종류
+SPAC_MARK = "스팩"              # 기업인수목적회사. 이름으로만 가려낼 수 있다
 
 
 def fetch_market_snapshot():
@@ -92,6 +93,20 @@ def fetch_market_snapshot():
     return date, list(seen.values())
 
 
+def apply_overrides(rows):
+    """다른 탭과 같은 업종 수정(`data/sector_overrides.json`)을 거래대금에도 적용한다.
+
+    적용하지 않으면 SK스퀘어가 섹터 탭에서는 '지주사', 거래대금 탭에서는
+    '반도체와반도체장비'로 갈려 보인다.
+    """
+    index = {r["code"]: r for r in rows}
+    sectors = {code: r["sector"] for code, r in index.items()}
+    applied = ka.apply_sector_overrides(sectors, {c: r["name"] for c, r in index.items()})
+    for code, sector in sectors.items():
+        index[code]["sector"] = sector
+    return applied
+
+
 def _round(v):
     return None if v is None else round(v)
 
@@ -103,8 +118,19 @@ def _num(raw, divide=1.0):
         return None
 
 
+def is_operating_company(row):
+    """ETF·ETN·스팩을 뺀다.
+
+    셋 다 거래대금 상위에 자주 올라오지만 사업을 하는 회사가 아니라서,
+    "어느 종목에 돈이 몰렸나"를 보는 데 방해가 된다. ETF·ETN은 네이버가
+    `stockEndType`으로 구분해 주고, 스팩은 그런 구분이 없어 이름으로
+    가려낸다(국내 스팩은 예외 없이 이름에 '스팩'이 들어간다).
+    """
+    return row["kind"] not in FUND_KINDS and SPAC_MARK not in row["name"]
+
+
 def summarise(rows, top=TOP, sector_top=SECTOR_TOP):
-    """한 묶음(시장 × 필터)의 상위 종목과 섹터 합계."""
+    """한 시장의 상위 종목과 섹터 합계."""
     rows = sorted(rows, key=lambda r: (-r["value"], r["code"]))
     sectors = {}
     for r in rows:
@@ -127,15 +153,10 @@ def summarise(rows, top=TOP, sector_top=SECTOR_TOP):
 
 
 def day_payload(rows):
-    """시장(KOSPI/KOSDAQ) × 필터(전체/주식만) 네 묶음."""
-    out = {}
-    for market in MARKETS:
-        here = [r for r in rows if r["market"] == market]
-        out[market] = {
-            "all": summarise(here),
-            "stock": summarise([r for r in here if r["kind"] not in FUND_KINDS]),
-        }
-    return out
+    """시장(KOSPI/KOSDAQ)별 한 묶음."""
+    keep = [r for r in rows if is_operating_company(r)]
+    return {market: summarise([r for r in keep if r["market"] == market])
+            for market in MARKETS}
 
 
 def load():
@@ -149,7 +170,12 @@ def load():
 
 def main():
     date, rows = fetch_market_snapshot()
-    print(f"{date}: {len(rows)} listed names across {', '.join(MARKETS)}")
+    moved = apply_overrides(rows)
+    if moved:
+        print(f"sector overrides applied to {moved} names")
+    dropped = len(rows) - sum(1 for r in rows if is_operating_company(r))
+    print(f"{date}: {len(rows)} listed names across {', '.join(MARKETS)}"
+          f" ({dropped} ETF/ETN/스팩 제외)")
 
     doc = load()
     days = doc.get("days", {})
@@ -160,10 +186,9 @@ def main():
 
     names = doc.get("names", {})
     names.update({r["code"]: r["name"] for r in rows})
-    kept = {c for d in days.values() for m in d["markets"].values()
-            for f in m.values()
-            for c in ([r["c"] for r in f["top"]]
-                      + [code for s in f["sectors"] for code, _ in s[3]])}
+    kept = {c for d in days.values() for block in d["markets"].values()
+            for c in ([r["c"] for r in block["top"]]
+                      + [code for s in block["sectors"] for code, _ in s[3]])}
 
     payload = {
         "generated_at": dt.datetime.now(ka.KST).isoformat(),
@@ -176,9 +201,9 @@ def main():
 
     board = days[date]["markets"]
     for market in MARKETS:
-        best = board[market]["all"]["top"][0]
-        print(f"  {market}: {board[market]['all']['total']:,}억 "
-              f"({board[market]['all']['n']}종목), 1위 "
+        best = board[market]["top"][0]
+        print(f"  {market}: {board[market]['total']:,}억 "
+              f"({board[market]['n']}종목), 1위 "
               f"{names.get(best['c'], best['c'])} {best['v']:,}억")
     print(f"{'Saved' if changed else 'Unchanged —'} {len(payload['dates'])} days "
           f"({payload['dates'][0]} ~ {payload['dates'][-1]}), "

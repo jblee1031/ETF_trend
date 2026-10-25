@@ -1836,13 +1836,11 @@ async function loadSectorTab() {
 }
 
 // ── 거래대금 탭 ────────────────────────────────────────────────────────────
-// 상장 전 종목(코스피 1,640 / 코스닥 1,824)을 본다. 정배열·섹터 탭의 구성종목
-// 351개와는 범위가 다르다 — HTS의 거래대금 상위와 맞추기 위해서다.
+// 상장 전 종목을 보되 ETF·ETN·스팩은 뺀다. 정배열·섹터 탭의 구성종목 351개와는
+// 범위가 다르다 — HTS의 거래대금 상위와 맞추기 위해서다.
 // 값은 거래소 집계치이며, 지나간 날짜를 일봉으로 채운 구간만 추정이다.
 
 const TN_MARKETS = { all: "전체", KOSPI: "코스피", KOSDAQ: "코스닥" };
-const TN_KINDS = { all: "전체", stock: "주식만" };
-const TN_FUND = { etf: "ETF", etn: "ETN" };
 
 function fmtEok(v) {
   if (v === null || v === undefined) return "-";
@@ -1856,9 +1854,9 @@ function fmtEok(v) {
 
 // 전체 = 코스피 + 코스닥. 각 시장이 자기 상위 15종목을 담고 있으므로 합쳐서
 // 다시 15개를 자르면 전체 기준 상위 15종목과 정확히 같다.
-function tnBlock(day, market, kind) {
-  if (market !== "all") return (day.markets[market] || {})[kind] || null;
-  const parts = Object.keys(day.markets).map((m) => day.markets[m][kind]).filter(Boolean);
+function tnBlock(day, market) {
+  if (market !== "all") return day.markets[market] || null;
+  const parts = Object.keys(day.markets).map((m) => day.markets[m]).filter(Boolean);
   if (!parts.length) return null;
   const sectors = {};
   parts.forEach((b) => b.sectors.forEach(([name, value, count, members]) => {
@@ -1880,15 +1878,13 @@ function tnBlock(day, market, kind) {
 }
 
 function renderTurnoverTab(app, data) {
-  const state = { market: "all", kind: "all", date: null, sector: null };
+  const state = { market: "all", date: null, sector: null };
   let pareto = null;
   const nameOf = (code) => data.names[code] || code;
 
   app.innerHTML = `
     <div class="toolbar">
       <label>시장</label><span class="controls tn-market"></span>
-      <span class="sep"></span>
-      <label>종류</label><span class="controls tn-kind"></span>
       <span class="sep"></span>
       <label>기준일</label><select class="tn-date"></select>
       <span class="count tn-count"></span>
@@ -1918,12 +1914,6 @@ function renderTurnoverTab(app, data) {
     state.sector = null;
     draw();
   });
-  const kindBtns = buttons(q(".tn-kind"), TN_KINDS, (key) => {
-    state.kind = key;
-    state.sector = null;
-    draw();
-  });
-
   state.date = data.dates[data.dates.length - 1];
   q(".tn-date").innerHTML = data.dates.slice().reverse()
     .map((d) => `<option value="${d}"${d === state.date ? " selected" : ""}>${d}`
@@ -1936,9 +1926,8 @@ function renderTurnoverTab(app, data) {
 
   function draw() {
     Object.entries(marketBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.market));
-    Object.entries(kindBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.kind));
     const day = data.days[state.date];
-    const block = day && tnBlock(day, state.market, state.kind);
+    const block = day && tnBlock(day, state.market);
     if (!block || !block.top.length) {
       q(".tn-table").innerHTML = '<div class="empty">그날 데이터가 없습니다.</div>';
       q(".tn-count").textContent = "";
@@ -1950,17 +1939,17 @@ function renderTurnoverTab(app, data) {
       + ` · 상위 15종목이 ${(topSum / block.total * 100).toFixed(1)}%`
       + ` · ${fmtNum(block.n)}종목 집계`
       + (day.exact ? "" : " · 추정치");
-    q(".tn-scope").textContent = day.exact
-      ? "거래소 집계 거래대금, 단위 억원"
-      : "일봉으로 채운 추정치 (종가 × 거래량), 단위 억원";
+    q(".tn-scope").textContent = (day.exact
+      ? "거래소 집계 거래대금"
+      : "일봉으로 채운 추정치 (종가 × 거래량, 등락률은 전일 종가 대비)")
+      + " · ETF·ETN·스팩 제외 · 단위 억원";
 
     let html = "<table><thead><tr><th>순위</th><th>종목</th><th>섹터</th>"
       + "<th>종가</th><th>등락률</th><th>거래대금</th><th>비중</th>"
       + "<th>시가총액</th></tr></thead><tbody>";
     block.top.forEach((r, i) => {
-      const tag = TN_FUND[r.k] ? ` <span class="badge">${TN_FUND[r.k]}</span>` : "";
       html += `<tr><td>${i + 1}</td>`
-        + `<td><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${nameOf(r.c)}</a>${tag}</td>`
+        + `<td><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${nameOf(r.c)}</a></td>`
         + `<td>${r.s}</td><td>${fmtNum(r.p)}</td>${pctCell(r.r)}`
         + `<td>${fmtEok(r.v)}</td><td>${(r.v / block.total * 100).toFixed(1)}%</td>`
         + `<td>${fmtCap(r.cap)}</td></tr>`;
