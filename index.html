@@ -356,8 +356,13 @@
   #app-calendar .cal-cell.pad { background: transparent; border-color: transparent; min-height: 0; }
   #app-calendar .cal-cell.off { background: #0d0f13; }
   #app-calendar .cal-cell.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-  #app-calendar .cal-cell .num { color: var(--muted); margin-bottom: 4px; font-size: 11px; }
+  #app-calendar .cal-cell .num { color: var(--muted); margin-bottom: 4px; font-size: 11px;
+    display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 6px; }
   #app-calendar .cal-wd { display: none; }
+  #app-calendar .cal-idx { margin-left: auto; font-size: 10px; color: #8b93a5;
+    white-space: nowrap; letter-spacing: -.2px; }
+  #app-calendar .cal-idx i { font-style: normal; color: #6b7280; margin-right: 1px; }
+  #app-calendar .cal-idx .q { margin-left: 5px; }
   #app-calendar .cal-cell.off .num { color: #6b7280; }
   #app-calendar .cal-cell .num b { color: var(--text); font-size: 13px; }
   #app-calendar .cal-ev { display: block; border-left: 3px solid var(--border);
@@ -1823,8 +1828,19 @@ function calToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
 }
 
-function renderCalendarTab(app, data) {
+function renderCalendarTab(app, data, index) {
   const cats = data.cats;
+  const idx = (index && index.series) || {};
+  const idxLabels = (index && index.labels) || { k: "코스피", q: "코스닥" };
+  const fmtIdx = (v) => v.toLocaleString("ko-KR", { minimumFractionDigits: 2,
+                                                   maximumFractionDigits: 2 });
+  // 거래일에만 값이 있다. 휴장일·주말·아직 오지 않은 날은 비워 둔다.
+  const indexTag = (key) => {
+    const v = idx[key];
+    if (!v) return "";
+    return `<span class="cal-idx" title="${idxLabels.k} / ${idxLabels.q} 종가">`
+      + `<i>코</i>${fmtIdx(v.k)}<span class="q"><i>닥</i>${fmtIdx(v.q)}</span></span>`;
+  };
   const today = calToday();
   const active = new Set(Object.keys(cats));
   const state = { hidePast: false };
@@ -1872,7 +1888,8 @@ function renderCalendarTab(app, data) {
         `<span class="cal-ev ${e.c}${e.b ? " big" : ""}">${e.s}</span>`).join("");
       const wdName = `<span class="cal-wd"> (${CAL_DOW[(wd + 6) % 7]})</span>`;
       cells += `<div class="${cls.join(" ")}">`
-        + `<div class="num"><b>${d}</b>${wdName}${holidayLabel(key)}</div>${shown}</div>`;
+        + `<div class="num"><b>${d}</b>${wdName}${holidayLabel(key)}${indexTag(key)}</div>`
+        + `${shown}</div>`;
     }
     const dow = CAL_DOW.map((n, i) =>
       `<div class="cal-dow${i > 4 ? " wk" : ""}">${n}</div>`).join("");
@@ -1917,8 +1934,12 @@ function renderCalendarTab(app, data) {
 async function loadCalendarTab() {
   const app = document.getElementById("app-calendar");
   try {
-    const data = await fetch("data/calendar.json", { cache: "no-store" }).then((r) => r.json());
-    renderCalendarTab(app, data);
+    const [data, index] = await Promise.all([
+      fetch("data/calendar.json", { cache: "no-store" }).then((r) => r.json()),
+      fetch("data/index_daily.json", { cache: "no-store" })
+        .then((r) => r.json()).catch(() => null),
+    ]);
+    renderCalendarTab(app, data, index);
     return data.generated_at;
   } catch (err) {
     console.error(err);
