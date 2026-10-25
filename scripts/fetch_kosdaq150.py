@@ -16,4 +16,5 @@ if __name__ == "__main__":
     # closest benchmark it serves.
     ka.build("kosdaq150", lambda: ka.universe_from_etf("229200", "KOSDAQ"), min_universe=100,
              index_symbol="KOSDAQ", index_label="코스닥 종합",
-             index_note="코스닥150 지수는 데이터 소스에서 제공되지 않아 코스닥 종합지수로 대체")
+             index_note="코스닥150 지수는 데이터 소스에서 제공되지 않아 코스닥 종합지수로 대체",
+             universe_label="코스닥150")

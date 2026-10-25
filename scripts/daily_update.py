@@ -27,7 +27,8 @@ MARKETS = ["kospi200", "kosdaq150"]
 DATA_FILES = ["data/prices.json",
               "data/kospi200_signals.json", "data/kosdaq150_signals.json",
               "data/kospi200_sectors.json", "data/kosdaq150_sectors.json",
-              "data/index_daily.json"]
+              "data/index_daily.json",
+              "data/kospi200_turnover.json", "data/kosdaq150_turnover.json"]
 LIVE = "https://jblee1031.github.io/ETF_trend/data/"
 COLLECTORS = ["fetch_prices.py", "fetch_kospi200.py", "fetch_kosdaq150.py",
               "fetch_index_daily.py"]

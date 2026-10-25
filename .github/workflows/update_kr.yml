@@ -52,8 +52,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/prices.json data/index_daily.json \
-                  data/kospi200_signals.json data/kospi200_tickers.json data/kospi200_sectors.json \
-                  data/kosdaq150_signals.json data/kosdaq150_tickers.json data/kosdaq150_sectors.json
+                  data/kospi200_signals.json data/kospi200_tickers.json data/kospi200_sectors.json data/kospi200_turnover.json \
+                  data/kosdaq150_signals.json data/kosdaq150_tickers.json data/kosdaq150_sectors.json data/kosdaq150_turnover.json
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0

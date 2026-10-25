@@ -59,6 +59,9 @@ DATA_DIR = ROOT / "data"
 MA_WINDOWS = [5, 10, 20, 60, 120]
 TEMPLATE_WINDOWS = [50, 150, 200]   # Minervini's trend template uses these
 SNAPSHOT_DAYS = 40     # trading days of signal history to publish (~2 months)
+TURNOVER_FROM = "2026-10-01"  # 거래대금 탭이 보여주기 시작하는 날
+TURNOVER_TOP = 15             # 하루에 세우는 상위 종목 수
+TURNOVER_SECTOR_TOP = 5       # 파레토 막대를 눌렀을 때 보여줄 섹터 내 상위 종목
 CHART_DAYS = 110       # close prices kept for the trend chart; covers a 3-month
                        # window even when the oldest snapshot date is selected
 SLOPE_LOOKBACK = 22    # ~1 month, for "is the 200-day average still rising"
@@ -67,6 +70,12 @@ WEEKS52 = 250          # trading days standing in for a 52-week window
 # window (200 + SECTOR_DAYS), which also clears the alignment tab's needs
 # (MA200 SLOPE_LOOKBACK days before the oldest snapshot: 200 + 22 + 40).
 HISTORY_POINTS = 340
+
+# 윈도우 콘솔은 기본이 cp949라 종목명과 — 같은 문자에서 print가 죽는다.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 CHART_URL = "https://fchart.stock.naver.com/sise.nhn"
 INDUSTRY_URL = "https://m.stock.naver.com/api/stocks/industry"
@@ -381,6 +390,58 @@ def template_checks(m, rs):
     ]
 
 
+
+def turnover_series(per_stock, sectors, caps, names,
+                    start=TURNOVER_FROM, top=TURNOVER_TOP):
+    """날짜별 거래대금 상위 종목과 섹터별 합계.
+
+    네이버 일봉에는 거래대금이 없고 거래량만 있어 `종가 × 거래량`으로 추정한다
+    (섹터 탭의 거래대금 막대와 같은 계산). 장중 체결가로 쌓이는 거래소 공식
+    거래대금과는 몇 퍼센트 어긋날 수 있지만, 어디에 돈이 몰렸는지 순서를
+    보는 데는 충분하다. 단위는 억원.
+    """
+    by_date = {}
+    for code, stock in per_stock.items():
+        for row in stock["ohlc"]:
+            date = row["date"]
+            if date < start or not row.get("volume") or not row.get("close"):
+                continue
+            by_date.setdefault(date, []).append(
+                (row["close"] * row["volume"] / 1e8, code, row))
+
+    days = {}
+    seen = set()
+    for date, entries in by_date.items():
+        # 같은 금액이면 종목코드 순으로 — 재실행해도 순서가 흔들리지 않게.
+        entries.sort(key=lambda e: (-e[0], e[1]))
+        totals = {}
+        for value, code, _row in entries:
+            agg = totals.setdefault(sectors.get(code, "기타"), [0.0, 0, []])
+            agg[0] += value
+            agg[1] += 1
+            # entries가 이미 금액 내림차순이라 앞에서부터 채우면 그대로 상위다.
+            if len(agg[2]) < TURNOVER_SECTOR_TOP:
+                agg[2].append([code, round(value)])
+                seen.add(code)
+        for _value, code, _row in entries[:top]:
+            seen.add(code)
+        days[date] = {
+            "total": round(sum(e[0] for e in entries)),
+            "universe": len(entries),
+            "top": [{
+                "c": code,
+                "s": sectors.get(code, "기타"),
+                "v": round(value),
+                "p": row["close"],
+                "r": per_stock[code]["chg"].get(date),
+                "cap": caps.get(code),
+            } for value, code, row in entries[:top]],
+            "sectors": sorted(([name, round(value), count, members]
+                               for name, (value, count, members) in totals.items()),
+                              key=lambda b: (-b[1], b[0])),
+        }
+    return days, {code: names.get(code, code) for code in sorted(seen)}
+
 def write_if_changed(path, payload, **dump_kwargs):
     """Write JSON unless the file already holds the same data.
 
@@ -635,7 +696,8 @@ def sector_series(per_stock, sectors, caps, axis, names=None, publish=SECTOR_DAY
     return out
 
 
-def build(market, fetch_universe, min_universe, index_symbol, index_label, index_note=None):
+def build(market, fetch_universe, min_universe, index_symbol, index_label,
+          index_note=None, universe_label=None):
     """Run the whole pipeline for one market and write its two data files."""
     tickers_path = DATA_DIR / f"{market}_tickers.json"
     signals_path = DATA_DIR / f"{market}_signals.json"
@@ -770,6 +832,19 @@ def build(market, fetch_universe, min_universe, index_symbol, index_label, index
     }
     write_if_changed(DATA_DIR / f"{market}_sectors.json", sectors_output, separators=(",", ":"))
 
+    turnover_days, turnover_names = turnover_series(
+        per_stock, sectors, caps, {code: universe[code] for code in per_stock})
+    turnover_output = {
+        "generated_at": datetime.now(KST).isoformat(),
+        "label": universe_label or index_label,
+        "from": TURNOVER_FROM,
+        "names": turnover_names,
+        "dates": sorted(turnover_days),
+        "days": turnover_days,
+    }
+    write_if_changed(DATA_DIR / f"{market}_turnover.json", turnover_output,
+                     separators=(",", ":"))
+
     latest = snapshot_dates[-1]
     short_n = len(snapshots[latest])
     full_n = sum(1 for r in snapshots[latest] if r["f"])
@@ -779,6 +854,12 @@ def build(market, fetch_universe, min_universe, index_symbol, index_label, index
     print(f"Latest {latest}: {short_n} short-aligned, {full_n} fully aligned")
     print(f"Chart series: {len(output['series'])} stocks x {len(chart_dates)} days")
     print(f"Sector candles: {len(sectors_output['sectors'])} sectors x {len(sectors_output['dates'])} days")
+    if turnover_output["dates"]:
+        t_last = turnover_output["dates"][-1]
+        best = turnover_days[t_last]["top"][0]
+        print(f"Turnover: {len(turnover_output['dates'])} days from {TURNOVER_FROM}; "
+              f"{t_last} top={turnover_names.get(best['c'], best['c'])} "
+              f"{best['v']:,}억 / {len(turnover_names)} names")
     if missing_sector:
         print(f"No sector for: {missing_sector}", file=sys.stderr)
     if failures:
