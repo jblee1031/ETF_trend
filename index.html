@@ -13,6 +13,8 @@
     --text: #e6e8ee;
     --muted: #9aa1b1;
     --accent: #4f8cff;
+    --cal-kr: #ff6b6b; --cal-us: #4f8cff; --cal-macro: #ffb84d;
+    --cal-policy: #c084fc; --cal-market: #4ade80;
   }
   * { box-sizing: border-box; }
   body {
@@ -328,6 +330,74 @@
   .badge.new { background: #4a3a2d; color: #ffc07a; }
   .badge.near { background: #3a3350; color: #c0a7ff; }
   .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* ── 증시 일정 달력 탭 */
+  #app-calendar .cal-legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 14px; }
+  #app-calendar .cal-b { background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  #app-calendar .cal-b.on { color: var(--text); border-color: currentColor; }
+  #app-calendar .cal-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: 1px; background: currentColor; }
+  #app-calendar .cal-b-kr.on { color: var(--cal-kr); }
+  #app-calendar .cal-b-us.on { color: var(--cal-us); }
+  #app-calendar .cal-b-macro.on { color: var(--cal-macro); }
+  #app-calendar .cal-b-policy.on { color: var(--cal-policy); }
+  #app-calendar .cal-b-market.on { color: var(--cal-market); }
+
+  #app-calendar .cal-months { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { #app-calendar .cal-months { grid-template-columns: 1fr; } }
+  #app-calendar .cal-box { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; }
+  #app-calendar .cal-box h3 { margin: 2px 0 10px; font-size: 15px; }
+  #app-calendar .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  #app-calendar .cal-dow { text-align: center; font-size: 11px; color: var(--muted); padding-bottom: 4px; }
+  #app-calendar .cal-dow.wk { color: #6b7280; }
+  #app-calendar .cal-cell { min-height: 78px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 5px; background: #12141a; font-size: 11px; overflow: hidden; }
+  #app-calendar .cal-cell.pad { background: transparent; border-color: transparent; min-height: 0; }
+  #app-calendar .cal-cell.off { background: #0d0f13; }
+  #app-calendar .cal-cell.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  #app-calendar .cal-cell .num { color: var(--muted); margin-bottom: 3px; }
+  #app-calendar .cal-cell.off .num { color: #6b7280; }
+  #app-calendar .cal-cell .num b { color: var(--text); font-size: 12px; }
+  #app-calendar .cal-ev { display: block; border-left: 3px solid var(--border); padding: 1px 0 1px 4px;
+    margin-bottom: 2px; line-height: 1.25; color: #cdd2dd;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #app-calendar .cal-ev.big { color: var(--text); font-weight: 600; }
+  #app-calendar .cal-ev.kr { border-color: var(--cal-kr); }
+  #app-calendar .cal-ev.us { border-color: var(--cal-us); }
+  #app-calendar .cal-ev.macro { border-color: var(--cal-macro); }
+  #app-calendar .cal-ev.policy { border-color: var(--cal-policy); }
+  #app-calendar .cal-ev.market { border-color: var(--cal-market); }
+  #app-calendar .cal-ev.more { border-color: transparent; color: var(--muted); }
+
+  #app-calendar table.cal-list { font-size: 13px; white-space: normal; margin-top: 4px; }
+  #app-calendar table.cal-list thead th { text-align: left; position: static; }
+  #app-calendar table.cal-list tbody td { text-align: left; vertical-align: top;
+    position: static; background: none; white-space: normal; padding: 9px 8px; }
+  #app-calendar table.cal-list tbody tr.big td { background: #191d26; }
+  #app-calendar table.cal-list tbody tr.past td { opacity: .45; }
+  #app-calendar table.cal-list tbody tr:hover td { background: #1c2029; }
+  #app-calendar td.cal-day { white-space: nowrap; color: var(--muted); width: 88px; }
+  #app-calendar td.cal-day b { color: var(--text); }
+  #app-calendar td.cal-tag { width: 92px; white-space: nowrap; font-size: 11px; }
+  #app-calendar .cal-pill { border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px; }
+  #app-calendar .cal-pill.kr { color: var(--cal-kr); }
+  #app-calendar .cal-pill.us { color: var(--cal-us); }
+  #app-calendar .cal-pill.macro { color: var(--cal-macro); }
+  #app-calendar .cal-pill.policy { color: var(--cal-policy); }
+  #app-calendar .cal-pill.market { color: var(--cal-market); }
+  #app-calendar td.cal-what b { display: block; margin-bottom: 2px; }
+  #app-calendar td.cal-what .n { color: var(--muted); font-size: 12px; }
+  #app-calendar .cal-flag { color: var(--cal-macro); font-size: 11px; border: 1px solid currentColor;
+    border-radius: 3px; padding: 0 4px; margin-left: 6px; font-weight: 400; }
+  #app-calendar .cal-notes { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px; margin-top: 22px; font-size: 13px;
+    color: #cdd2dd; line-height: 1.6; }
+  #app-calendar .cal-notes h3 { margin: 0 0 8px; font-size: 14px; }
+  #app-calendar .cal-notes ul { margin: 0; padding-left: 18px; }
+  #app-calendar .cal-notes li { margin-bottom: 6px; }
+  #app-calendar .cal-notes .cal-src { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
 </style>
 </head>
 <body>
@@ -341,6 +411,7 @@
   <button id="tab-btn-kospi" data-tab="kospi">코스피200 정배열</button>
   <button id="tab-btn-kosdaq" data-tab="kosdaq">코스닥150 정배열</button>
   <button id="tab-btn-sector" data-tab="sector">섹터 흐름</button>
+  <button id="tab-btn-calendar" data-tab="calendar">증시 일정</button>
 </nav>
 <main>
   <div id="app-kr" class="tab-panel active"><div class="loading">데이터를 불러오는 중입니다...</div></div>
@@ -348,6 +419,7 @@
   <div id="app-kospi" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-kosdaq" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-sector" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-calendar" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
 </main>
 
 <script>
@@ -1733,6 +1805,116 @@ async function loadSectorTab() {
   }
 }
 
+const CAL_DOW = ["월", "화", "수", "목", "금", "토", "일"];
+
+// 달력은 한국시간 기준으로 "오늘"을 잡는다 (브라우저 표준시와 무관하게).
+function calToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+}
+
+function renderCalendarTab(app, data) {
+  const cats = data.cats;
+  const today = calToday();
+  const active = new Set(Object.keys(cats));
+  const state = { hidePast: false };
+  const byDay = {};
+  data.events.forEach((e) => { (byDay[e.d] = byDay[e.d] || []).push(e); });
+  const pad = (n) => String(n).padStart(2, "0");
+  const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+  const holidays = new Set([...(data.kr_holidays || []), ...(data.us_holidays || [])]);
+  const holidayLabel = (key) => ((data.us_holidays || []).includes(key) ? " 미국휴장"
+    : (data.kr_holidays || []).includes(key) ? " 국내휴장" : "");
+
+  app.innerHTML = `
+    <div class="cal-legend">
+      ${Object.entries(cats).map(([k, label]) =>
+        `<button class="cal-b cal-b-${k} on" data-c="${k}"><span class="cal-dot"></span>${label}</button>`).join("")}
+      <span class="sep"></span>
+      <button class="cal-b" data-past="1">지난 일정 숨기기</button>
+    </div>
+    <div class="cal-months"></div>
+    <h2>날짜별 상세 <span class="rule">음영 = 지수 전체를 흔들 수 있는 일정</span></h2>
+    <table class="cal-list">
+      <thead><tr><th>날짜</th><th>분류</th><th>일정</th></tr></thead><tbody></tbody>
+    </table>
+    <div class="cal-notes">
+      <h3>읽는 법과 주의점</h3>
+      <ul>${(data.notes || []).map((n) => `<li>${n}</li>`).join("")}</ul>
+      <p class="cal-src">${data.compiled_on || ""} 기준으로 모았습니다. 날짜는 회사 IR·DART·KRX 공지로 다시 확인하세요.</p>
+    </div>`;
+
+  function monthBox(year, month) {
+    const lead = (new Date(year, month - 1, 1).getDay() + 6) % 7;  // 월요일 시작
+    const days = new Date(year, month, 0).getDate();
+    let cells = "";
+    for (let i = 0; i < lead; i++) cells += `<div class="cal-cell pad"></div>`;
+    for (let d = 1; d <= days; d++) {
+      const key = iso(year, month, d);
+      const wd = new Date(year, month - 1, d).getDay();
+      const evs = (byDay[key] || []).filter((e) => active.has(e.c))
+        .sort((a, b) => (b.b || 0) - (a.b || 0));
+      const cls = ["cal-cell"];
+      if (wd === 0 || wd === 6 || holidays.has(key)) cls.push("off");
+      if (key === today) cls.push("today");
+      const shown = evs.slice(0, 3).map((e) =>
+        `<span class="cal-ev ${e.c}${e.b ? " big" : ""}">${e.s}</span>`).join("");
+      const extra = evs.length > 3 ? `<span class="cal-ev more">+${evs.length - 3}건</span>` : "";
+      cells += `<div class="${cls.join(" ")}">`
+        + `<div class="num"><b>${d}</b>${holidayLabel(key)}</div>${shown}${extra}</div>`;
+    }
+    const dow = CAL_DOW.map((n, i) =>
+      `<div class="cal-dow${i > 4 ? " wk" : ""}">${n}</div>`).join("");
+    return `<div class="cal-box"><h3>${year}년 ${month}월</h3>`
+      + `<div class="cal-grid">${dow}${cells}</div></div>`;
+  }
+
+  function paint() {
+    app.querySelector(".cal-months").innerHTML =
+      (data.months || []).map(([y, m]) => monthBox(y, m)).join("");
+    const rows = data.events
+      .filter((e) => active.has(e.c) && !(state.hidePast && e.d < today))
+      .sort((a, b) => a.d.localeCompare(b.d) || (b.b || 0) - (a.b || 0));
+    app.querySelector(".cal-list tbody").innerHTML = rows.map((e) => {
+      const dt = new Date(e.d + "T00:00:00");
+      const day = `${dt.getMonth() + 1}/${dt.getDate()}<b> (${CAL_DOW[(dt.getDay() + 6) % 7]})</b>`;
+      return `<tr class="${e.b ? "big" : ""}${e.d < today ? " past" : ""}">`
+        + `<td class="cal-day">${day}</td>`
+        + `<td class="cal-tag"><span class="cal-pill ${e.c}">${cats[e.c]}</span></td>`
+        + `<td class="cal-what"><b>${e.s}${e.e ? '<span class="cal-flag">추정</span>' : ""}</b>`
+        + `<span class="n">${e.n || ""}</span></td></tr>`;
+    }).join("") || `<tr><td colspan="3" class="cal-what">표시할 일정이 없습니다.</td></tr>`;
+  }
+
+  app.querySelectorAll(".cal-legend button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.past) {
+        state.hidePast = !state.hidePast;
+        btn.classList.toggle("on", state.hidePast);
+        btn.textContent = state.hidePast ? "지난 일정 보기" : "지난 일정 숨기기";
+      } else {
+        const c = btn.dataset.c;
+        if (active.has(c)) { active.delete(c); btn.classList.remove("on"); }
+        else { active.add(c); btn.classList.add("on"); }
+      }
+      paint();
+    });
+  });
+  paint();
+}
+
+async function loadCalendarTab() {
+  const app = document.getElementById("app-calendar");
+  try {
+    const data = await fetch("data/calendar.json", { cache: "no-store" }).then((r) => r.json());
+    renderCalendarTab(app, data);
+    return data.generated_at;
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = `<div class="error">일정을 불러오지 못했습니다: ${err.message}</div>`;
+    return null;
+  }
+}
+
 function setupTabs() {
   const buttons = document.querySelectorAll(".tabs button");
   buttons.forEach((btn) => {
@@ -1753,6 +1935,7 @@ async function main() {
     loadAlignment("app-kospi", "data/kospi200_signals.json", "코스피200"),
     loadAlignment("app-kosdaq", "data/kosdaq150_signals.json", "코스닥150"),
     loadSectorTab(),
+    loadCalendarTab(),
   ]);
   const parts = [];
   if (krUpdatedAt) parts.push("국내 " + new Date(krUpdatedAt).toLocaleString("ko-KR"));
