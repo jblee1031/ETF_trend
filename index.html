@@ -362,6 +362,7 @@
   #app-calendar .cal-idx { margin-left: auto; font-size: 10px; color: #8b93a5;
     white-space: nowrap; letter-spacing: -.2px; }
   #app-calendar .cal-idx i { font-style: normal; color: #6b7280; margin-right: 1px; }
+  #app-calendar .cal-idx .v { font-weight: 600; }
   #app-calendar .cal-idx .q { margin-left: 5px; }
   #app-calendar .cal-cell.off .num { color: #6b7280; }
   #app-calendar .cal-cell .num b { color: var(--text); font-size: 13px; }
@@ -422,20 +423,22 @@
   <p id="updated-at">불러오는 중...</p>
 </header>
 <nav class="tabs">
-  <button id="tab-btn-kr" class="active" data-tab="kr">국내 ETF</button>
-  <button id="tab-btn-us" data-tab="us">미국 주식/ETF</button>
-  <button id="tab-btn-kospi" data-tab="kospi">코스피200 정배열</button>
+  <button id="tab-btn-kospi" class="active" data-tab="kospi">코스피200 정배열</button>
   <button id="tab-btn-kosdaq" data-tab="kosdaq">코스닥150 정배열</button>
+  <button id="tab-btn-turnover" data-tab="turnover">거래대금</button>
   <button id="tab-btn-sector" data-tab="sector">섹터 흐름</button>
   <button id="tab-btn-calendar" data-tab="calendar">증시 일정</button>
+  <button id="tab-btn-kr" data-tab="kr">국내 ETF</button>
+  <button id="tab-btn-us" data-tab="us">미국 주식/ETF</button>
 </nav>
 <main>
-  <div id="app-kr" class="tab-panel active"><div class="loading">데이터를 불러오는 중입니다...</div></div>
-  <div id="app-us" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
-  <div id="app-kospi" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-kospi" class="tab-panel active"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-kosdaq" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-turnover" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-sector" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
   <div id="app-calendar" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-kr" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
+  <div id="app-us" class="tab-panel"><div class="loading">데이터를 불러오는 중입니다...</div></div>
 </main>
 
 <script>
@@ -810,11 +813,16 @@ function trendChart(canvas, data, codes, period, metric, asOfDate) {
   });
 }
 
-function paretoChart(canvas, buckets, onPick) {
-  const total = buckets.reduce((sum, b) => sum + b.codes.length, 0);
+function paretoChart(canvas, buckets, onPick, opts = {}) {
+  // 주의: 옵션 이름으로 valueOf 를 쓰면 Object.prototype.valueOf 가 잡힌다.
+  const pick = opts.pick || ((b) => b.codes.length);
+  const axisLabel = opts.axisLabel || "종목 수";
+  const fmt = opts.fmt || ((v) => v);
+  const values = buckets.map((b) => pick(b));
+  const total = values.reduce((sum, v) => sum + v, 0) || 1;
   let running = 0;
-  const cumulative = buckets.map((b) => {
-    running += b.codes.length;
+  const cumulative = values.map((v) => {
+    running += v;
     return (running / total) * 100;
   });
 
@@ -825,8 +833,8 @@ function paretoChart(canvas, buckets, onPick) {
       datasets: [
         {
           type: "bar",
-          label: "종목 수",
-          data: buckets.map((b) => b.codes.length),
+          label: axisLabel,
+          data: values,
           backgroundColor: "#4f8cff",
           hoverBackgroundColor: "#7aa8ff",
           yAxisID: "y",
@@ -861,14 +869,20 @@ function paretoChart(canvas, buckets, onPick) {
           callbacks: {
             label: (ctx) =>
               ctx.dataset.type === "bar"
-                ? `종목 수: ${ctx.parsed.y}`
+                ? `${axisLabel}: ${fmt(ctx.parsed.y)}`
                 : `누적 비중: ${ctx.parsed.y.toFixed(1)}%`,
           },
         },
       },
       scales: {
         x: { type: "category", ticks: { color: "#9aa1b1", maxRotation: 60, minRotation: 45, font: { size: 10 } }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: "#9aa1b1", precision: 0 }, grid: { color: "#1e222c" }, title: { display: true, text: "종목 수", color: "#9aa1b1" } },
+        y: {
+          beginAtZero: true,
+          ticks: { color: "#9aa1b1", precision: 0,
+                   callback: opts.fmt ? (v) => fmt(v) : undefined },
+          grid: { color: "#1e222c" },
+          title: { display: true, text: axisLabel, color: "#9aa1b1" },
+        },
         y1: {
           position: "right",
           beginAtZero: true,
@@ -1821,6 +1835,201 @@ async function loadSectorTab() {
   }
 }
 
+// ── 거래대금 탭 ────────────────────────────────────────────────────────────
+// 거래대금은 `종가 × 거래량` 추정치다 (네이버 일봉에 거래대금 필드가 없다).
+// 단위는 억원. 정배열·섹터 탭과 같은 한 번의 시세 조회를 나눠 쓴다.
+
+function fmtEok(v) {
+  if (v === null || v === undefined) return "-";
+  if (v >= 10000) {
+    const jo = Math.floor(v / 10000);
+    const rest = Math.round(v % 10000);
+    return rest ? `${jo}조 ${fmtNum(rest)}억` : `${jo}조`;
+  }
+  return `${fmtNum(Math.round(v))}억`;
+}
+
+// 시장별 파일을 하나로 합친다. 각 시장이 자기 상위 15종목을 담고 있으므로
+// 합친 뒤 다시 15개를 자르면 전체 기준 상위 15종목과 정확히 같다.
+function mergeTurnover(markets) {
+  const days = {};
+  const names = {};
+  Object.values(markets).forEach((m) => {
+    Object.assign(names, m.names || {});
+    m.dates.forEach((date) => {
+      const src = m.days[date];
+      const acc = days[date] || (days[date] = { total: 0, universe: 0, top: [], sec: {} });
+      acc.total += src.total;
+      acc.universe += src.universe;
+      acc.top = acc.top.concat(src.top);
+      (src.sectors || []).forEach(([name, value, count, members]) => {
+        const bucket = acc.sec[name] || (acc.sec[name] = [0, 0, []]);
+        bucket[0] += value;
+        bucket[1] += count;
+        bucket[2] = bucket[2].concat(members || []);
+      });
+    });
+  });
+  Object.values(days).forEach((d) => {
+    d.top.sort((a, b) => b.v - a.v || a.c.localeCompare(b.c));
+    d.top = d.top.slice(0, 15);
+    d.sectors = Object.entries(d.sec).map(([name, [value, count, members]]) => {
+      members.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+      return [name, value, count, members.slice(0, 5)];
+    }).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    delete d.sec;
+  });
+  return { label: "전체", names, dates: Object.keys(days).sort(), days };
+}
+
+function renderTurnoverTab(app, markets) {
+  const merged = mergeTurnover(markets);
+  const sets = { all: merged, ...markets };
+  const labels = { all: "전체" };
+  Object.entries(markets).forEach(([k, m]) => { labels[k] = m.label; });
+  const state = { market: "all", date: null, sector: null };
+  let pareto = null;
+
+  app.innerHTML = `
+    <div class="toolbar">
+      <label>시장</label><span class="controls tn-market"></span>
+      <span class="sep"></span>
+      <label>기준일</label><select class="tn-date"></select>
+      <span class="count tn-count"></span>
+    </div>
+    <h2>거래대금 상위 15종목 <span class="rule">거래대금 = 종가 × 거래량 추정, 단위 억원</span></h2>
+    <div class="table-wrap tn-table"></div>
+    <h2>섹터별 거래대금 <span class="rule">막대를 누르면 그 섹터에서 가장 많이 거래된 종목</span></h2>
+    <div class="chart-wrap"><canvas class="tn-pareto"></canvas></div>
+    <div class="tn-detail"></div>`;
+
+  const q = (sel) => app.querySelector(sel);
+  const set = () => sets[state.market];
+  const nameOf = (code) => (set().names || {})[code] || merged.names[code] || code;
+
+  function buttons(container, items, onPick) {
+    const btns = {};
+    items.forEach(([key, text]) => {
+      const b = document.createElement("button");
+      b.textContent = text;
+      container.appendChild(b);
+      b.addEventListener("click", () => onPick(key));
+      btns[key] = b;
+    });
+    return btns;
+  }
+
+  const marketBtns = buttons(q(".tn-market"), Object.entries(labels), (key) => {
+    state.market = key;
+    state.sector = null;
+    syncDates();
+    draw();
+  });
+
+  function syncDates() {
+    const dates = set().dates;
+    if (!dates.includes(state.date)) state.date = dates[dates.length - 1];
+    q(".tn-date").innerHTML = dates.slice().reverse()
+      .map((d) => `<option value="${d}"${d === state.date ? " selected" : ""}>${d}</option>`)
+      .join("");
+  }
+
+  q(".tn-date").addEventListener("change", (e) => {
+    state.date = e.target.value;
+    state.sector = null;
+    draw();
+  });
+
+  function draw() {
+    Object.entries(marketBtns).forEach(([k, b]) => b.classList.toggle("active", k === state.market));
+    const day = set().days[state.date];
+    if (!day) {
+      q(".tn-table").innerHTML = '<div class="empty">그날 데이터가 없습니다.</div>';
+      return;
+    }
+
+    const topSum = day.top.reduce((sum, r) => sum + r.v, 0);
+    q(".tn-count").textContent = `${state.date} · 전체 ${fmtEok(day.total)}`
+      + ` · 상위 15종목이 ${(topSum / day.total * 100).toFixed(1)}%`
+      + ` · ${day.universe}종목 집계`;
+
+    let html = "<table><thead><tr><th>순위</th><th>종목</th><th>섹터</th>"
+      + "<th>종가</th><th>등락률</th><th>거래대금</th><th>비중</th>"
+      + "<th>시가총액</th></tr></thead><tbody>";
+    day.top.forEach((r, i) => {
+      html += `<tr><td>${i + 1}</td>`
+        + `<td><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${nameOf(r.c)}</a></td>`
+        + `<td>${r.s}</td><td>${fmtNum(r.p)}</td>${pctCell(r.r)}`
+        + `<td>${fmtEok(r.v)}</td><td>${(r.v / day.total * 100).toFixed(1)}%</td>`
+        + `<td>${fmtCap(r.cap)}</td></tr>`;
+    });
+    q(".tn-table").innerHTML = html + "</tbody></table>";
+
+    const buckets = day.sectors.map(([name, value, count, members]) =>
+      ({ sector: name, value, count, members: members || [] }));
+    if (pareto) { pareto.destroy(); pareto = null; }
+    if (buckets.length) {
+      pareto = paretoChart(q(".tn-pareto"), buckets, (bucket) => {
+        state.sector = bucket.sector;
+        drawDetail(bucket);
+      }, { pick: (b) => b.value, axisLabel: "거래대금(억원)", fmt: fmtEok });
+    }
+    drawDetail(state.sector ? buckets.find((b) => b.sector === state.sector) : null);
+  }
+
+  function drawDetail(bucket) {
+    if (!bucket) {
+      q(".tn-detail").innerHTML =
+        '<div class="empty">막대를 누르면 그 섹터에서 가장 많이 거래된 종목이 나옵니다.</div>';
+      return;
+    }
+    const day = set().days[state.date];
+    let html = `<h3>${bucket.sector} <span class="rule">${bucket.count}종목 · `
+      + `${fmtEok(bucket.value)} · 전체의 ${(bucket.value / day.total * 100).toFixed(1)}%</span></h3>`
+      + '<div class="table-wrap"><table><thead><tr><th>종목</th><th>거래대금</th>'
+      + "<th>섹터 내 비중</th></tr></thead><tbody>";
+    bucket.members.forEach(([code, value]) => {
+      html += `<tr><td><a href="${fnguideUrl(code)}" target="_blank" rel="noopener">`
+        + `${nameOf(code)}</a></td>`
+        + `<td>${fmtEok(value)}</td>`
+        + `<td>${(value / bucket.value * 100).toFixed(1)}%</td></tr>`;
+    });
+    q(".tn-detail").innerHTML = html + "</tbody></table></div>"
+      + '<p class="rule">섹터마다 상위 5종목까지 저장합니다.</p>';
+  }
+
+  syncDates();
+  draw();
+}
+
+async function loadTurnoverTab() {
+  const app = document.getElementById("app-turnover");
+  // 수집이 아직 한 번도 돌지 않았으면 파일이 없다. 그때는 오류가 아니라
+  // 준비 중으로 보여 준다 (다른 탭은 그대로 뜬다).
+  const grab = (url) => fetch(url, { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  try {
+    const [kospi, kosdaq] = await Promise.all([
+      grab("data/kospi200_turnover.json"),
+      grab("data/kosdaq150_turnover.json"),
+    ]);
+    const have = {};
+    if (kospi) have.kospi200 = kospi;
+    if (kosdaq) have.kosdaq150 = kosdaq;
+    if (!Object.keys(have).length) {
+      app.innerHTML = '<div class="empty">거래대금 데이터를 준비하고 있습니다. '
+        + '다음 수집(평일 20:05) 이후에 채워집니다.</div>';
+      return null;
+    }
+    renderTurnoverTab(app, have);
+    return (kospi || kosdaq).generated_at;
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = `<div class="error">거래대금 데이터를 불러오지 못했습니다: ${err.message}</div>`;
+    return null;
+  }
+}
+
 const CAL_DOW = ["일", "월", "화", "수", "목", "금", "토"];  // Date.getDay() 순서
 
 // 달력은 한국시간 기준으로 "오늘"을 잡는다 (브라우저 표준시와 무관하게).
@@ -1834,12 +2043,27 @@ function renderCalendarTab(app, data, index) {
   const idxLabels = (index && index.labels) || { k: "코스피", q: "코스닥" };
   const fmtIdx = (v) => v.toLocaleString("ko-KR", { minimumFractionDigits: 2,
                                                    maximumFractionDigits: 2 });
+  // 전일 대비 방향을 색으로: 오르면 빨강, 내리면 파랑 (국내 증시 관행).
+  const idxDates = Object.keys(idx).sort();
+  const prevDate = {};
+  idxDates.forEach((d, i) => { if (i) prevDate[d] = idxDates[i - 1]; });
+  const move = (now, before) => {
+    if (before === undefined || before === null || now === before) return ["", ""];
+    const pct = ((now / before - 1) * 100).toFixed(2);
+    return [now > before ? " up" : " down", `${now > before ? "+" : ""}${pct}%`];
+  };
   // 거래일에만 값이 있다. 휴장일·주말·아직 오지 않은 날은 비워 둔다.
   const indexTag = (key) => {
     const v = idx[key];
     if (!v) return "";
-    return `<span class="cal-idx" title="${idxLabels.k} / ${idxLabels.q} 종가">`
-      + `<i>코</i>${fmtIdx(v.k)}<span class="q"><i>닥</i>${fmtIdx(v.q)}</span></span>`;
+    const p = idx[prevDate[key]] || {};
+    const [kCls, kPct] = move(v.k, p.k);
+    const [qCls, qPct] = move(v.q, p.q);
+    const tip = `${idxLabels.k} ${fmtIdx(v.k)} ${kPct}`.trim()
+      + ` / ${idxLabels.q} ${fmtIdx(v.q)} ${qPct}`.trimEnd() + " (전일 대비)";
+    return `<span class="cal-idx" title="${tip}">`
+      + `<i>코</i><span class="v${kCls}">${fmtIdx(v.k)}</span>`
+      + `<span class="q"><i>닥</i><span class="v${qCls}">${fmtIdx(v.q)}</span></span></span>`;
   };
   const today = calToday();
   const active = new Set(Object.keys(cats));
@@ -1969,6 +2193,7 @@ async function main() {
     loadAlignment("app-kosdaq", "data/kosdaq150_signals.json", "코스닥150"),
     loadSectorTab(),
     loadCalendarTab(),
+    loadTurnoverTab(),
   ]);
   const parts = [];
   if (krUpdatedAt) parts.push("국내 " + new Date(krUpdatedAt).toLocaleString("ko-KR"));
