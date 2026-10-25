@@ -1821,7 +1821,7 @@ async function loadSectorTab() {
   }
 }
 
-const CAL_DOW = ["월", "화", "수", "목", "금", "토", "일"];
+const CAL_DOW = ["일", "월", "화", "수", "목", "금", "토"];  // Date.getDay() 순서
 
 // 달력은 한국시간 기준으로 "오늘"을 잡는다 (브라우저 표준시와 무관하게).
 function calToday() {
@@ -1871,7 +1871,7 @@ function renderCalendarTab(app, data, index) {
     </div>`;
 
   function monthBox(year, month) {
-    const lead = (new Date(year, month - 1, 1).getDay() + 6) % 7;  // 월요일 시작
+    const lead = new Date(year, month - 1, 1).getDay();  // 일요일 시작
     const days = new Date(year, month, 0).getDate();
     let cells = "";
     for (let i = 0; i < lead; i++) cells += `<div class="cal-cell pad"></div>`;
@@ -1886,13 +1886,13 @@ function renderCalendarTab(app, data, index) {
       if (evs.length) cls.push("has");
       const shown = evs.map((e) =>
         `<span class="cal-ev ${e.c}${e.b ? " big" : ""}">${e.s}</span>`).join("");
-      const wdName = `<span class="cal-wd"> (${CAL_DOW[(wd + 6) % 7]})</span>`;
+      const wdName = `<span class="cal-wd"> (${CAL_DOW[wd]})</span>`;
       cells += `<div class="${cls.join(" ")}">`
         + `<div class="num"><b>${d}</b>${wdName}${holidayLabel(key)}${indexTag(key)}</div>`
         + `${shown}</div>`;
     }
     const dow = CAL_DOW.map((n, i) =>
-      `<div class="cal-dow${i > 4 ? " wk" : ""}">${n}</div>`).join("");
+      `<div class="cal-dow${i === 0 || i === 6 ? " wk" : ""}">${n}</div>`).join("");
     return `<div class="cal-box"><h3>${year}년 ${month}월</h3>`
       + `<div class="cal-grid">${dow}${cells}</div></div>`;
   }
@@ -1905,7 +1905,7 @@ function renderCalendarTab(app, data, index) {
       .sort((a, b) => a.d.localeCompare(b.d) || (b.b || 0) - (a.b || 0));
     app.querySelector(".cal-list tbody").innerHTML = rows.map((e) => {
       const dt = new Date(e.d + "T00:00:00");
-      const day = `${dt.getMonth() + 1}/${dt.getDate()}<b> (${CAL_DOW[(dt.getDay() + 6) % 7]})</b>`;
+      const day = `${dt.getMonth() + 1}/${dt.getDate()}<b> (${CAL_DOW[dt.getDay()]})</b>`;
       return `<tr class="${e.b ? "big" : ""}${e.d < today ? " past" : ""}">`
         + `<td class="cal-day">${day}</td>`
         + `<td class="cal-tag"><span class="cal-pill ${e.c}">${cats[e.c]}</span></td>`
