@@ -344,32 +344,31 @@
   #app-calendar .cal-b-policy.on { color: var(--cal-policy); }
   #app-calendar .cal-b-market.on { color: var(--cal-market); }
 
-  #app-calendar .cal-months { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 900px) { #app-calendar .cal-months { grid-template-columns: 1fr; } }
+  #app-calendar .cal-months { display: grid; grid-template-columns: 1fr; gap: 16px; }
   #app-calendar .cal-box { background: var(--panel); border: 1px solid var(--border);
     border-radius: 10px; padding: 12px; }
   #app-calendar .cal-box h3 { margin: 2px 0 10px; font-size: 15px; }
   #app-calendar .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-  #app-calendar .cal-dow { text-align: center; font-size: 11px; color: var(--muted); padding-bottom: 4px; }
+  #app-calendar .cal-dow { text-align: center; font-size: 12px; color: var(--muted); padding-bottom: 5px; }
   #app-calendar .cal-dow.wk { color: #6b7280; }
-  #app-calendar .cal-cell { min-height: 78px; border: 1px solid var(--border); border-radius: 6px;
-    padding: 4px 5px; background: #12141a; font-size: 11px; overflow: hidden; }
+  #app-calendar .cal-cell { min-height: 104px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 7px; background: #12141a; font-size: 12px; }
   #app-calendar .cal-cell.pad { background: transparent; border-color: transparent; min-height: 0; }
   #app-calendar .cal-cell.off { background: #0d0f13; }
   #app-calendar .cal-cell.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-  #app-calendar .cal-cell .num { color: var(--muted); margin-bottom: 3px; }
+  #app-calendar .cal-cell .num { color: var(--muted); margin-bottom: 4px; font-size: 11px; }
+  #app-calendar .cal-wd { display: none; }
   #app-calendar .cal-cell.off .num { color: #6b7280; }
-  #app-calendar .cal-cell .num b { color: var(--text); font-size: 12px; }
-  #app-calendar .cal-ev { display: block; border-left: 3px solid var(--border); padding: 1px 0 1px 4px;
-    margin-bottom: 2px; line-height: 1.25; color: #cdd2dd;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #app-calendar .cal-cell .num b { color: var(--text); font-size: 13px; }
+  #app-calendar .cal-ev { display: block; border-left: 3px solid var(--border);
+    padding: 2px 0 2px 6px; margin-bottom: 4px; line-height: 1.35; color: #cdd2dd;
+    white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
   #app-calendar .cal-ev.big { color: var(--text); font-weight: 600; }
   #app-calendar .cal-ev.kr { border-color: var(--cal-kr); }
   #app-calendar .cal-ev.us { border-color: var(--cal-us); }
   #app-calendar .cal-ev.macro { border-color: var(--cal-macro); }
   #app-calendar .cal-ev.policy { border-color: var(--cal-policy); }
   #app-calendar .cal-ev.market { border-color: var(--cal-market); }
-  #app-calendar .cal-ev.more { border-color: transparent; color: var(--muted); }
 
   #app-calendar table.cal-list { font-size: 13px; white-space: normal; margin-top: 4px; }
   #app-calendar table.cal-list thead th { text-align: left; position: static; }
@@ -391,6 +390,18 @@
   #app-calendar td.cal-what .n { color: var(--muted); font-size: 12px; }
   #app-calendar .cal-flag { color: var(--cal-macro); font-size: 11px; border: 1px solid currentColor;
     border-radius: 3px; padding: 0 4px; margin-left: 6px; font-weight: 400; }
+  @media (max-width: 760px) {
+    #app-calendar .cal-grid { display: block; }
+    #app-calendar .cal-dow { display: none; }
+    #app-calendar .cal-cell.pad, #app-calendar .cal-cell:not(.has) { display: none; }
+    #app-calendar .cal-cell { min-height: 0; margin-bottom: 6px; padding: 8px 10px; }
+    #app-calendar .cal-cell .num { font-size: 12px; margin-bottom: 6px; }
+    #app-calendar .cal-wd { display: inline; }
+    #app-calendar .cal-ev { margin-bottom: 5px; }
+    #app-calendar td.cal-day { width: 72px; }
+    #app-calendar td.cal-tag { width: 76px; }
+  }
+
   #app-calendar .cal-notes { background: var(--panel); border: 1px solid var(--border);
     border-radius: 10px; padding: 14px 18px; margin-top: 22px; font-size: 13px;
     color: #cdd2dd; line-height: 1.6; }
@@ -1856,11 +1867,12 @@ function renderCalendarTab(app, data) {
       const cls = ["cal-cell"];
       if (wd === 0 || wd === 6 || holidays.has(key)) cls.push("off");
       if (key === today) cls.push("today");
-      const shown = evs.slice(0, 3).map((e) =>
+      if (evs.length) cls.push("has");
+      const shown = evs.map((e) =>
         `<span class="cal-ev ${e.c}${e.b ? " big" : ""}">${e.s}</span>`).join("");
-      const extra = evs.length > 3 ? `<span class="cal-ev more">+${evs.length - 3}건</span>` : "";
+      const wdName = `<span class="cal-wd"> (${CAL_DOW[(wd + 6) % 7]})</span>`;
       cells += `<div class="${cls.join(" ")}">`
-        + `<div class="num"><b>${d}</b>${holidayLabel(key)}</div>${shown}${extra}</div>`;
+        + `<div class="num"><b>${d}</b>${wdName}${holidayLabel(key)}</div>${shown}</div>`;
     }
     const dow = CAL_DOW.map((n, i) =>
       `<div class="cal-dow${i > 4 ? " wk" : ""}">${n}</div>`).join("");
