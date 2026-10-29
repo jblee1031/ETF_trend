@@ -196,6 +196,32 @@ def close_pairs(history):
     return [(row["date"], row["close"]) for row in history]
 
 
+def industry_page(url, retries=3):
+    """업종 API 한 페이지. 일시적 실패와 '마지막 페이지'를 구분한다.
+
+    get_json 은 네트워크 실패도, 마지막 페이지 뒤에 오는 HTML 응답도 똑같이
+    None 으로 돌려준다. 그 None 을 끝으로 읽으면 그 업종이 통째로 빠지는데,
+    바깥에서는 조용히 '업종 없는 종목'으로만 나타난다. 실제로 2026-10-29
+    수집에서 코스닥150 중 22종목(에코프로·심텍·고영·에스엠 등)의 업종이
+    이렇게 사라져 검증에 걸렸다. 그래서 실패는 다시 두드리고, 200 응답인데
+    JSON 이 아닐 때만 끝으로 본다.
+    """
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, headers=MOBILE_HEADERS, timeout=10)
+        except Exception:  # noqa: BLE001
+            time.sleep(0.5 * (attempt + 1))
+            continue
+        if resp.status_code != 200:
+            time.sleep(0.5 * (attempt + 1))
+            continue
+        try:
+            return resp.json()
+        except ValueError:
+            return None          # 마지막 페이지 뒤 — HTML 이 온다
+    return None
+
+
 def fetch_sector_and_cap():
     """Map every listed KRX stock to its sector name and market cap (억원).
 
@@ -205,7 +231,7 @@ def fetch_sector_and_cap():
     """
     groups = {}
     for page in range(1, 20):
-        data = get_json(f"{INDUSTRY_URL}?page={page}")
+        data = industry_page(f"{INDUSTRY_URL}?page={page}")
         rows = (data or {}).get("groups") or []
         if not rows:
             break
@@ -217,10 +243,13 @@ def fetch_sector_and_cap():
         time.sleep(0.1)
 
     sectors, caps = {}, {}
+    empty = []
     for no, name in groups.items():
+        found = 0
         for page in range(1, 8):
-            data = get_json(f"{INDUSTRY_URL}/{no}?page={page}&pageSize=100")
+            data = industry_page(f"{INDUSTRY_URL}/{no}?page={page}&pageSize=100")
             stocks = (data or {}).get("stocks") or []
+            found += len(stocks)
             for s in stocks:
                 sectors[s["itemCode"]] = name
                 cap = (s.get("marketValue") or "").replace(",", "")
@@ -229,7 +258,12 @@ def fetch_sector_and_cap():
             if len(stocks) < 100:
                 break
             time.sleep(0.05)
+        if not found:
+            empty.append(name)
         time.sleep(0.05)
+    if empty:
+        print(f"WARN sector walk returned nothing for {len(empty)} industries: "
+              f"{', '.join(empty[:6])}", file=sys.stderr)
     return sectors, caps
 
 
