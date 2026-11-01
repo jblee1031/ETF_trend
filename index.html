@@ -2197,7 +2197,8 @@ function renderCalendarTab(app, data, index) {
 function renderLowPbr(host, d) {
   if (!d || !(d.rows || []).length) { host.innerHTML = ""; return; }
   const rows = d.rows;
-  const state = { market: "all", sort: "pbr0" };
+  // 기본은 시가총액 큰 순. 151행을 위에서부터 읽을 때 아는 이름이 먼저 나온다.
+  const state = { market: "all", sort: "cap" };
   const num = (v, digits = 0) => (v === null || v === undefined || Number.isNaN(v) ? "—"
     : v.toLocaleString("ko-KR", { minimumFractionDigits: digits, maximumFractionDigits: digits }));
   // 네이버가 억원 단위로 주므로 1조가 넘을 때만 조로 바꾼다.
@@ -2235,7 +2236,7 @@ function renderLowPbr(host, d) {
         <option value="KOSDAQ">코스닥</option>
       </select>
       <select class="lp-sort">${Object.entries(SORTS).map(([k, v]) =>
-        `<option value="${k}">${v[0]}</option>`).join("")}</select>
+        `<option value="${k}"${k === state.sort ? " selected" : ""}>${v[0]}</option>`).join("")}</select>
       <span class="rule">주가·시총·실적은 ${d.trade_date} 종가 기준</span>
     </div>
     <div class="table-wrap lp-table"></div>
