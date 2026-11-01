@@ -415,6 +415,48 @@
   #app-calendar .cal-notes ul { margin: 0; padding-left: 18px; }
   #app-calendar .cal-notes li { margin-bottom: 6px; }
   #app-calendar .cal-notes .cal-src { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+
+  #app-calendar .lp { margin-top: 26px; }
+  #app-calendar .lp-sum { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 12px; }
+  #app-calendar .lp-card { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 13px; font-size: 12px; color: var(--muted); }
+  #app-calendar .lp-card b { display: block; color: var(--text); font-size: 17px;
+    font-weight: 700; margin-bottom: 2px; }
+  #app-calendar .lp-card.hi b { color: var(--cal-macro); }
+  #app-calendar .lp-ctl { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    margin-bottom: 10px; }
+  #app-calendar .lp-ctl select { background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+  #app-calendar .lp table { font-size: 12px; }
+  #app-calendar .lp table td { white-space: nowrap; }
+  #app-calendar .lp td.nm { white-space: normal; min-width: 108px; }
+  #app-calendar .lp td.sec { color: var(--muted); max-width: 120px; overflow: hidden;
+    text-overflow: ellipsis; }
+  #app-calendar .lp .mk { font-size: 10px; border: 1px solid var(--border); border-radius: 3px;
+    padding: 0 3px; margin-left: 4px; color: var(--muted); }
+  #app-calendar .lp .warn { color: var(--cal-macro); cursor: help; }
+  #app-calendar .lp .neg { color: var(--cal-us); }
+  #app-calendar .lp-why { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px; margin-top: 16px; font-size: 13px;
+    color: #cdd2dd; line-height: 1.65; }
+  #app-calendar .lp-why h3 { margin: 0 0 8px; font-size: 14px; }
+  #app-calendar .lp-why ol, #app-calendar .lp-why ul { margin: 0 0 10px; padding-left: 18px; }
+  #app-calendar .lp-why li { margin-bottom: 6px; }
+  #app-calendar .lp-why .caution { border-left: 3px solid var(--cal-macro); padding-left: 11px;
+    margin: 12px 0 0; }
+
+  #app-calendar .cal-archive { margin-top: 18px; border: 1px solid var(--border);
+    border-radius: 10px; background: var(--panel); }
+  #app-calendar .cal-archive > summary { cursor: pointer; padding: 12px 16px; font-size: 13px;
+    color: var(--muted); list-style: none; }
+  #app-calendar .cal-archive > summary::-webkit-details-marker { display: none; }
+  #app-calendar .cal-archive > summary::before { content: "\25B8"; margin-right: 8px; }
+  #app-calendar .cal-archive[open] > summary::before { content: "\25BE"; }
+  #app-calendar .cal-archive > summary:hover { color: var(--text); }
+  #app-calendar .cal-archive > summary b { color: var(--text); }
+  #app-calendar .cal-archive .cal-months { padding: 0 12px 14px; }
+  #app-calendar .cal-archive .cal-box { background: transparent; border-color: transparent;
+    padding: 0; }
 </style>
 </head>
 <body>
@@ -2060,16 +2102,23 @@ function renderCalendarTab(app, data, index) {
       <span class="sep"></span>
       <button class="cal-b" data-past="1">지난 일정 숨기기</button>
     </div>
-    <div class="cal-months"></div>
+    <div class="cal-months cal-main"></div>
     <h2>날짜별 상세 <span class="rule">음영 = 지수 전체를 흔들 수 있는 일정</span></h2>
     <table class="cal-list">
       <thead><tr><th>날짜</th><th>분류</th><th>일정</th></tr></thead><tbody></tbody>
     </table>
+    <div class="lp"></div>
     <div class="cal-notes">
       <h3>읽는 법과 주의점</h3>
       <ul>${(data.notes || []).map((n) => `<li>${n}</li>`).join("")}</ul>
       <p class="cal-src">${data.compiled_on || ""} 기준으로 모았습니다. 날짜는 회사 IR·DART·KRX 공지로 다시 확인하세요.</p>
-    </div>`;
+    </div>
+    ${(data.archive_months || []).length ? `
+    <details class="cal-archive">
+      <summary>지난 달력 보관 — <b>${data.archive_months.map(([y, m]) => `${y}년 ${m}월`).join(" · ")}</b>
+        <span class="n">(눌러서 펼치기)</span></summary>
+      <div class="cal-months cal-arch"></div>
+    </details>` : ""}`;
 
   function monthBox(year, month) {
     const lead = new Date(year, month - 1, 1).getDay();  // 일요일 시작
@@ -2099,8 +2148,12 @@ function renderCalendarTab(app, data, index) {
   }
 
   function paint() {
-    app.querySelector(".cal-months").innerHTML =
+    app.querySelector(".cal-main").innerHTML =
       (data.months || []).map(([y, m]) => monthBox(y, m)).join("");
+    const arch = app.querySelector(".cal-arch");
+    if (arch) {
+      arch.innerHTML = (data.archive_months || []).map(([y, m]) => monthBox(y, m)).join("");
+    }
     const rows = data.events
       .filter((e) => active.has(e.c) && !(state.hidePast && e.d < today))
       .sort((a, b) => a.d.localeCompare(b.d) || (b.b || 0) - (a.b || 0));
@@ -2132,15 +2185,144 @@ function renderCalendarTab(app, data, index) {
   paint();
 }
 
+// 거래소가 공표한 저PBR 명단. 명단은 반기마다 바뀌고 주가·실적은 매일 바뀌므로
+// data/lowpbr.json 이 둘을 합쳐 준다(fetch_lowpbr.py).
+function renderLowPbr(host, d) {
+  if (!d || !(d.rows || []).length) { host.innerHTML = ""; return; }
+  const rows = d.rows;
+  const state = { market: "all", sort: "pbr0" };
+  const num = (v, digits = 0) => (v === null || v === undefined || Number.isNaN(v) ? "—"
+    : v.toLocaleString("ko-KR", { minimumFractionDigits: digits, maximumFractionDigits: digits }));
+  // 네이버가 억원 단위로 주므로 1조가 넘을 때만 조로 바꾼다.
+  const eok = (v) => (v === null || v === undefined ? "—"
+    : Math.abs(v) >= 10000 ? `${(v / 10000).toFixed(1)}조` : `${num(Math.round(v))}억`);
+  const signed = (v, suffix = "%") => (v === null || v === undefined ? "—"
+    : `<span class="${v < 0 ? "down" : v > 0 ? "up" : ""}">${v > 0 ? "+" : ""}${num(v, 2)}${suffix}</span>`);
+
+  const cheap = rows.filter((r) => r.pbr !== null && r.pbr <= 0.3).length;
+  const payers = rows.filter((r) => (r.dy || 0) >= 4).length;
+  const losing = rows.filter((r) => r.fin && (r.fin["영업이익"] || 0) < 0).length;
+
+  const SORTS = {
+    pbr0: ["공표 PBR 낮은 순", (a, b) => a.pbr0 - b.pbr0],
+    pbr: ["현재 PBR 낮은 순", (a, b) => (a.pbr ?? 99) - (b.pbr ?? 99)],
+    cap: ["시가총액 큰 순", (a, b) => (b.cap || 0) - (a.cap || 0)],
+    dy: ["배당수익률 높은 순", (a, b) => (b.dy || 0) - (a.dy || 0)],
+    roe: ["ROE 높은 순", (a, b) => ((b.fin || {})["ROE"] ?? -999) - ((a.fin || {})["ROE"] ?? -999)],
+    r: ["당일 등락률 순", (a, b) => (b.r || 0) - (a.r || 0)],
+  };
+
+  host.innerHTML = `
+    <h2>저PBR 기업 명단 <span class="rule">한국거래소 공표 · ${d.as_of} 기준 반기 PBR</span></h2>
+    <div class="lp-sum">
+      <div class="lp-card"><b>${d.counts.KOSPI + d.counts.KOSDAQ}곳</b>코스피 ${d.counts.KOSPI} · 코스닥 ${d.counts.KOSDAQ}</div>
+      <div class="lp-card hi"><b>${num(d.avg_pbr, 2)}배</b>명단 평균 PBR</div>
+      <div class="lp-card"><b>${num(d.market_pbr_kospi, 2)} / ${num(d.market_pbr_kosdaq, 2)}배</b>코스피 / 코스닥 전체 PBR</div>
+      <div class="lp-card"><b>${cheap}곳</b>지금도 PBR 0.3배 이하</div>
+      <div class="lp-card"><b>${payers}곳</b>배당수익률 4% 이상</div>
+      <div class="lp-card"><b>${losing}곳</b>최근 결산 영업적자</div>
+    </div>
+    <div class="lp-ctl">
+      <select class="lp-mk">
+        <option value="all">전체 시장</option><option value="KOSPI">코스피</option>
+        <option value="KOSDAQ">코스닥</option>
+      </select>
+      <select class="lp-sort">${Object.entries(SORTS).map(([k, v]) =>
+        `<option value="${k}">${v[0]}</option>`).join("")}</select>
+      <span class="rule">주가·시총·실적은 ${d.trade_date} 종가 기준</span>
+    </div>
+    <div class="table-wrap lp-table"></div>
+    <div class="lp-why">
+      <h3>이 명단을 왜 보나 — 한국 정책과의 연결</h3>
+      <ol>
+        <li><b>정부 정책의 후속조치입니다.</b> 2026년 3월 '자본시장 체질개선 방안'에 따라 거래소가
+          저평가 기업을 <b>실명으로</b> 공표하기 시작했습니다. 코리아 디스카운트를 자율에 맡기지 않고
+          이름을 붙여 압박하겠다는 뜻입니다.</li>
+        <li><b>명단에서 빠지는 방법이 정해져 있습니다.</b> <b>기업가치 제고계획(밸류업 공시)</b>을 내면
+          1년간 공표가 면제됩니다. 이번에도 34곳이 그렇게 빠졌습니다. 즉 명단에 오른 151곳에게는
+          <b>자사주 소각·배당 확대·지배구조 개선을 공시할 동기</b>가 생겼고, 그 공시 자체가 재료가 됩니다.</li>
+        <li><b>기관 자금이 움직일 통로가 함께 열렸습니다.</b> 금융위원회가 스튜어드십 코드 가이드라인을
+          고쳐 기관투자자의 <b>주주 관여(engagement)</b>를 촉진합니다. 거래소는 151곳 전부에 1:1 PBR
+          개선 컨설팅을 지원합니다.</li>
+        <li><b>눈에 띄게 만들어 놨습니다.</b> 명단은 KIND 밸류업 페이지에 올라가고, 증권사 HTS·MTS에도
+          '저PBR 기업' 표시가 붙습니다. 다음 갱신은 <b>${d.next_update}</b>이므로, 그때까지가
+          회사들이 움직일 수 있는 시간입니다.</li>
+      </ol>
+      <div class="caution">
+        <b>그래서 다 사야 한다는 뜻은 아닙니다.</b> PBR이 낮다는 건 '싸다'가 아니라
+        <b>시장이 그 자산을 그만큼만 쳐준다</b>는 뜻입니다. 이 명단은 <b>3년 내내</b> 업종 하위권이었던
+        기업들이라 그 상태가 굳어 있을 가능성이 오히려 큽니다. 실제로 ${losing}곳은 최근 결산에서
+        영업적자였습니다. 자산이 현금을 못 만들면 PBR은 계속 낮게 남습니다(밸류 트랩).
+        재평가는 <b>회사가 실제로 행동(자사주 소각·배당·분할)을 공시할 때</b> 일어났지, 명단에
+        올랐다는 사실만으로 일어나지 않았습니다.
+        <br><br>
+        공표 PBR은 <b>${d.as_of} 기준 반기 값</b>이라 그 뒤의 주가 변동이 반영돼 있지 않습니다.
+        표에서 <span class="warn">현재 PBR</span>이 공표값보다 크게 높은 종목은 이미 재평가가
+        진행된 경우이니 두 숫자를 같이 보세요.
+      </div>
+      <p class="cal-src">출처: ${d.source}. 대상 ${num(d.universe)}개사(코스피 ${num(d.universe_kospi)} ·
+        코스닥 ${num(d.universe_kosdaq)}) 중 후보 ${d.candidates}곳에서 밸류업 공시 ${d.exempted}곳을 뺀
+        ${d.counts.KOSPI + d.counts.KOSDAQ}곳입니다. 선정 기준은 업종 내 PBR 하위
+        <b>코스피 25% · 코스닥 10%</b>에 최근 6반기 연속(또는 7반기 중 6반기) 해당입니다.
+        일정 정리이며 투자 판단이나 권유가 아닙니다.</p>
+    </div>`;
+
+  function paint() {
+    const list = rows.filter((r) => state.market === "all" || r.m === state.market)
+      .slice().sort(SORTS[state.sort][1]);
+    host.querySelector(".lp-table").innerHTML = `
+      <table><thead><tr>
+        <th>종목</th><th>업종</th><th>현재가</th><th>등락</th><th>시가총액</th>
+        <th>공표 PBR</th><th>현재 PBR</th><th>PER</th><th>배당</th>
+        <th>매출</th><th>영업이익</th><th>ROE</th><th>실적 기준</th>
+      </tr></thead><tbody>${list.map((r) => {
+        const f = r.fin || {};
+        // 공표 뒤 주가가 크게 오르면 두 PBR 이 벌어진다. 숨기지 말고 표시한다.
+        const drift = r.pbr !== null && r.pbr > r.pbr0 * 1.5;
+        const op = f["영업이익"];
+        return `<tr>
+          <td class="nm"><a href="${fnguideUrl(r.c)}" target="_blank" rel="noopener">${r.n}</a>`
+          + `<span class="mk">${r.m === "KOSPI" ? "코스피" : "코스닥"}</span></td>
+          <td class="sec" title="${r.sec}">${r.sec}</td>
+          <td>${num(r.p)}원</td>
+          <td>${signed(r.r)}</td>
+          <td>${eok(r.cap)}</td>
+          <td>${num(r.pbr0, 2)}배</td>
+          <td class="${drift ? "warn" : ""}"${drift
+            ? ' title="공표 기준일 이후 주가가 올라 현재 PBR이 공표값과 크게 다릅니다"' : ""}>`
+          + `${r.pbr === null ? "—" : num(r.pbr, 2) + "배"}${drift ? " ⚠" : ""}</td>
+          <td>${r.per === null ? "—" : num(r.per, 2) + "배"}</td>
+          <td>${r.dy ? num(r.dy, 2) + "%" : "—"}</td>
+          <td>${eok(f["매출액"])}</td>
+          <td class="${op !== undefined && op !== null && op < 0 ? "neg" : ""}">${eok(op)}</td>
+          <td>${f["ROE"] === undefined || f["ROE"] === null ? "—" : num(f["ROE"], 2) + "%"}</td>
+          <td>${f["기준"] || "—"}</td>
+        </tr>`;
+      }).join("")}</tbody></table>`;
+  }
+
+  host.querySelector(".lp-mk").addEventListener("change", (e) => {
+    state.market = e.target.value; paint();
+  });
+  host.querySelector(".lp-sort").addEventListener("change", (e) => {
+    state.sort = e.target.value; paint();
+  });
+  paint();
+}
+
 async function loadCalendarTab() {
   const app = document.getElementById("app-calendar");
   try {
-    const [data, index] = await Promise.all([
+    // 지수·저PBR 은 없어도 달력은 떠야 하므로 각각 따로 실패를 삼킨다.
+    const [data, index, lowpbr] = await Promise.all([
       fetch("data/calendar.json", { cache: "no-store" }).then((r) => r.json()),
       fetch("data/index_daily.json", { cache: "no-store" })
         .then((r) => r.json()).catch(() => null),
+      fetch("data/lowpbr.json", { cache: "no-store" })
+        .then((r) => r.json()).catch(() => null),
     ]);
     renderCalendarTab(app, data, index);
+    renderLowPbr(app.querySelector(".lp"), lowpbr);
     return data.generated_at;
   } catch (err) {
     console.error(err);
