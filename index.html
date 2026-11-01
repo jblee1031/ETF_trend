@@ -2098,6 +2098,9 @@ function renderCalendarTab(app, data, index) {
   data.events.forEach((e) => { (byDay[e.d] = byDay[e.d] || []).push(e); });
   const pad = (n) => String(n).padStart(2, "0");
   const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+  // 날짜별 상세는 본문 달력에 걸린 달만 싣는다. 지난 달 일정은 맨 아래 보관 달력에서 본다.
+  const shownMonths = new Set((data.months || []).map(([y, m]) => `${y}-${pad(m)}`));
+  const monthLabel = (data.months || []).map(([, m]) => `${m}월`).join(" · ");
   const holidays = new Set([...(data.kr_holidays || []), ...(data.us_holidays || [])]);
   const holidayLabel = (key) => ((data.us_holidays || []).includes(key) ? " 미국휴장"
     : (data.kr_holidays || []).includes(key) ? " 국내휴장" : "");
@@ -2110,7 +2113,7 @@ function renderCalendarTab(app, data, index) {
       <button class="cal-b" data-past="1">지난 일정 숨기기</button>
     </div>
     <div class="cal-months cal-main"></div>
-    <h2>날짜별 상세 <span class="rule">음영 = 지수 전체를 흔들 수 있는 일정</span></h2>
+    <h2>날짜별 상세 <span class="rule">${monthLabel} · 음영 = 지수 전체를 흔들 수 있는 일정</span></h2>
     <table class="cal-list">
       <thead><tr><th>날짜</th><th>분류</th><th>일정</th></tr></thead><tbody></tbody>
     </table>
@@ -2162,7 +2165,8 @@ function renderCalendarTab(app, data, index) {
       arch.innerHTML = (data.archive_months || []).map(([y, m]) => monthBox(y, m)).join("");
     }
     const rows = data.events
-      .filter((e) => active.has(e.c) && !(state.hidePast && e.d < today))
+      .filter((e) => active.has(e.c) && shownMonths.has(e.d.slice(0, 7))
+        && !(state.hidePast && e.d < today))
       .sort((a, b) => a.d.localeCompare(b.d) || (b.b || 0) - (a.b || 0));
     app.querySelector(".cal-list tbody").innerHTML = rows.map((e) => {
       const dt = new Date(e.d + "T00:00:00");
