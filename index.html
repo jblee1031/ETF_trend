@@ -2211,6 +2211,8 @@ function renderLowPbr(host, d) {
   const signed = (v, suffix = "%") => (v === null || v === undefined ? "—"
     : `<span class="${v < 0 ? "down" : v > 0 ? "up" : ""}">${v > 0 ? "+" : ""}${num(v, 2)}${suffix}</span>`);
 
+  // 공표 뒤 상장폐지된 종목. 표에는 시세가 없어 못 싣지만, 숫자가 줄어든 이유는 밝힌다.
+  const gone = d.retired || [];
   const cheap = rows.filter((r) => r.pbr !== null && r.pbr <= 0.3).length;
   const payers = rows.filter((r) => (r.dy || 0) >= 4).length;
   const losing = rows.filter((r) => r.fin && (r.fin["영업이익"] || 0) < 0).length;
@@ -2227,7 +2229,8 @@ function renderLowPbr(host, d) {
   host.innerHTML = `
     <h2>저PBR 기업 명단 <span class="rule">한국거래소 공표 · ${d.as_of} 기준 반기 PBR</span></h2>
     <div class="lp-sum">
-      <div class="lp-card"><b>${d.counts.KOSPI + d.counts.KOSDAQ}곳</b>코스피 ${d.counts.KOSPI} · 코스닥 ${d.counts.KOSDAQ}</div>
+      <div class="lp-card"><b>${rows.length}곳</b>코스피 ${d.counts.KOSPI} · 코스닥 ${d.counts.KOSDAQ}${
+        gone.length ? ` <span class="warn">(공표 ${d.listed}곳 − 폐지 ${gone.length})</span>` : ""}</div>
       <div class="lp-card hi"><b>${num(d.avg_pbr, 2)}배</b>명단 평균 PBR</div>
       <div class="lp-card"><b>${num(d.market_pbr_kospi, 2)} / ${num(d.market_pbr_kosdaq, 2)}배</b>코스피 / 코스닥 전체 PBR</div>
       <div class="lp-card"><b>${cheap}곳</b>지금도 PBR 0.3배 이하</div>
@@ -2274,7 +2277,9 @@ function renderLowPbr(host, d) {
       </div>
       <p class="cal-src">출처: ${d.source}. 대상 ${num(d.universe)}개사(코스피 ${num(d.universe_kospi)} ·
         코스닥 ${num(d.universe_kosdaq)}) 중 후보 ${d.candidates}곳에서 밸류업 공시 ${d.exempted}곳을 뺀
-        ${d.counts.KOSPI + d.counts.KOSDAQ}곳입니다. 선정 기준은 업종 내 PBR 하위
+        ${d.listed}곳입니다.${gone.length ? ` 그중 ${gone.map((g) =>
+          `<b>${g.n}</b>(${g.why})`).join(", ")}이(가) 빠져 지금 표에 남은 것은
+        ${rows.length}곳입니다.` : ""} 선정 기준은 업종 내 PBR 하위
         <b>코스피 25% · 코스닥 10%</b>에 최근 6반기 연속(또는 7반기 중 6반기) 해당입니다.
         일정 정리이며 투자 판단이나 권유가 아닙니다.</p>
     </div>`;

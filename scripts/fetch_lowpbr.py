@@ -84,6 +84,9 @@ def main():
     src = json.loads(SRC.read_text(encoding="utf-8"))
     aliases = {norm(k): v for k, v in (src.get("aliases") or {}).items()
                if not k.startswith("_")}
+    # 상장폐지된 종목은 '못 찾은 것'이 아니다. 조용히 빼되 사유를 화면까지 들고 간다.
+    retired = {k: v for k, v in (src.get("retired") or {}).items()
+               if not k.startswith("_")}
 
     print("listing the market ...", flush=True)
     trade_date, listed = ft.fetch_market_snapshot()
@@ -93,14 +96,17 @@ def main():
         by_name.setdefault(norm(row["name"]), row)
     print(f"{len(listed)} listed names, trade date {trade_date}", flush=True)
 
-    rows, missing = [], []
+    rows, missing, gone = [], [], []
     wanted = [(market, name, pbr)
               for market, entries in src["list"].items()
               for name, pbr in entries]
     for i, (market, name, krx_pbr) in enumerate(wanted, 1):
         hit = by_name.get(norm(aliases.get(norm(name), name))) or by_name.get(norm(name))
         if not hit:
-            missing.append(f"{market}:{name}")
+            if name in retired:
+                gone.append({"n": name, "m": market, "pbr0": krx_pbr, "why": retired[name]})
+            else:
+                missing.append(f"{market}:{name}")
             continue
         code = hit["code"]
         info, desc = totals(code)
@@ -128,6 +134,8 @@ def main():
         if i % 25 == 0:
             print(f"  {i}/{len(wanted)} ...", flush=True)
 
+    for g in gone:
+        print(f"  (상장폐지) {g['n']} — {g['why']}")
     if missing:
         print(f"WARN {len(missing)} names did not match a listed stock: "
               f"{', '.join(missing)}", file=sys.stderr)
@@ -140,12 +148,13 @@ def main():
         "counts": {"KOSPI": sum(1 for r in rows if r["m"] == "KOSPI"),
                    "KOSDAQ": sum(1 for r in rows if r["m"] == "KOSDAQ")},
         "listed": len(wanted),
+        "retired": gone,
         "unmatched": missing,
         "rows": rows,
     }
     changed = ka.write_if_changed(OUT, payload, separators=(",", ":"))
-    print(f"{'Saved' if changed else 'Unchanged —'} {len(rows)}/{len(wanted)} names, "
-          f"{OUT.stat().st_size // 1024} KB")
+    print(f"{'Saved' if changed else 'Unchanged —'} {len(rows)}/{len(wanted)} names"
+          f"{f' ({len(gone)} 상장폐지)' if gone else ''}, {OUT.stat().st_size // 1024} KB")
     if rows:
         cheap = min(rows, key=lambda r: r["pbr0"])
         print(f"  lowest published PBR: {cheap['n']} {cheap['pbr0']}배 "
